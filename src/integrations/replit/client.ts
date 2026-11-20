@@ -5,18 +5,15 @@ import type { OAuthClientProvider } from "@modelcontextprotocol/sdk/client/auth.
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 import type { JsonSchemaType } from "@modelcontextprotocol/sdk/validation/types.js";
 import { REPLIT_MCP_URL } from "./oauth";
+import { setTimeout as pause } from "node:timers/promises";
 
 export type ReplitToolResult = { content: Array<{ type: string; text?: string; [key: string]: unknown }>; structuredContent?: Record<string, unknown>; isError?: boolean; [key: string]: unknown };
 export type CreateAppInput = { appDescription: string; app_stack: "react_website"; userSpecifiedAppName?: string };
-export type PreviewLookupInput = { replId: string; gitSha: string; timestamp: string; enableHelium?: boolean };
-export type StartPreviewInput = { replId?: string; previewUrl: string; riverToken: string; riverGurl: string };
 
 /** Separate seam preserves existing publication mocks; caller supplies observed checkpoint metadata. */
 export interface ReplitArtifactPort {
   listAppFiles(replId: string, path?: string): Promise<ReplitToolResult>;
   readAppFile(replId: string, path: string): Promise<ReplitToolResult>;
-  getPreviewUrl(input: PreviewLookupInput): Promise<ReplitToolResult>;
-  startAppPreview(input: StartPreviewInput): Promise<ReplitToolResult>;
 }
 
 export interface ReplitMcpPort {
@@ -29,7 +26,9 @@ export interface ReplitMcpPort {
   close(): Promise<void>;
 }
 
-const allowedTools = new Set(["create_app_from_prompt", "update_app_using_prompt", "ask_question", "publish_app", "get_publish_status", "list_apps", "search_apps", "resolve_app_by_name", "list_app_files", "read_app_file", "replit_widget_get_preview_url", "replit_widget_start_app_preview"]);
+// Widget tools are deliberately excluded: their live descriptions mark them internal-only.
+const allowedTools = new Set(["create_app_from_prompt", "update_app_using_prompt", "ask_question", "publish_app", "get_publish_status", "list_apps", "search_apps", "resolve_app_by_name", "list_app_files", "read_app_file"]);
+const safeReadTools = new Set(["get_publish_status", "list_apps", "search_apps", "resolve_app_by_name", "list_app_files", "read_app_file"]);
 
 function sourcePath(value: string) {
   if (!value || value.length > 1000 || value.startsWith("/") || value.includes("\\") || value.split("/").some(segment => !segment || segment.startsWith(".") || ["node_modules", "credentials", "secrets"].includes(segment.toLowerCase()))) {
@@ -78,11 +77,20 @@ export class ReplitMcpClient implements ReplitMcpPort, ReplitArtifactPort {
     if (!tool) throw new Error(`Replit capability unavailable: ${name}.`);
     const result = this.validator.getValidator(tool.inputSchema as JsonSchemaType)(args);
     if (!result.valid) throw new Error(`Replit arguments do not match discovered schema for ${name}.`);
-    let response: ReplitToolResult;
-    try { response = await this.client.callTool({ name, arguments: args }, undefined, { timeout: 120_000, maxTotalTimeout: 180_000 }) as ReplitToolResult; }
-    catch { throw new Error(`Replit ${name} request failed; reconcile remote outcome before retrying mutations.`); }
-    if (response.isError) throw new Error(`Replit ${name} returned a provider error.`);
-    return response;
+    const readOnly = safeReadTools.has(name);
+    const attempts = readOnly ? 3 : 1;
+    for (let attempt = 0; attempt < attempts; attempt++) {
+      let response: ReplitToolResult;
+      try { response = await this.client.callTool({ name, arguments: args }, undefined, { timeout: readOnly ? 30_000 : 120_000, maxTotalTimeout: readOnly ? 60_000 : 180_000 }) as ReplitToolResult; }
+      catch {
+        if (attempt + 1 < attempts) { await pause(150 * (2 ** attempt)); continue; }
+        throw new Error(`Replit ${name} request failed; reconcile remote outcome before retrying mutations.`);
+      }
+      if (!response.isError) return response;
+      if (attempt + 1 < attempts) { await pause(150 * (2 ** attempt)); continue; }
+      throw new Error(`Replit ${name} returned a provider error.`);
+    }
+    throw new Error("Replit request attempts exhausted.");
   }
   createApp(input: CreateAppInput) { return this.call("create_app_from_prompt", input); }
   updateApp(replId: string, changeDescription: string) { return this.call("update_app_using_prompt", { replId, changeDescription }); }
@@ -94,9 +102,5 @@ export class ReplitMcpClient implements ReplitMcpPort, ReplitArtifactPort {
   getPublishStatus(replId: string) { return this.call("get_publish_status", { replId }); }
   listAppFiles(replId: string, path?: string) { return this.call("list_app_files", path === undefined ? { replId } : { replId, path: sourcePath(path.replace(/\/$/, "")) }); }
   readAppFile(replId: string, path: string) { return this.call("read_app_file", { replId, path: sourcePath(path) }); }
-  getPreviewUrl(input: PreviewLookupInput) { return this.call("replit_widget_get_preview_url", input); }
-  // River credentials must come from a documented/observed provider flow, never authnToken guessing.
-  // Arguments and preview tokens must never be logged or persisted into public evidence.
-  startAppPreview(input: StartPreviewInput) { return this.call("replit_widget_start_app_preview", input); }
   close() { return this.client.close(); }
 }

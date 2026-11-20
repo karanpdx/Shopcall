@@ -52,6 +52,7 @@ function DraftCard({ draft, active, cameraOn, onSelect, onCapture, onUpload, onR
         </span>
       </button>
       {missing.length > 0 && <p className="missing">Still needs: {missing.map(m => LABELS[m]).join(", ")}</p>}
+      {draft.approved && <p className="muted">Approved and saved to your catalog. Use a new call to change this listing.</p>}
 
       <ul className="thumbs" aria-label={`Photos for ${draft.title || "this product"}`}>
         {draft.captures.map(c => (
@@ -60,9 +61,9 @@ function DraftCard({ draft, active, cameraOn, onSelect, onCapture, onUpload, onR
             <img src={c.thumbnailUrl ?? c.previewUrl} alt={`Photo of ${draft.title || "product"}`} />
             <span className="thumb-status">{c.status === "uploading" ? "Saving…" : c.status === "saved" ? "Saved" : "Not saved"}</span>
             {c.error && <span className="sr-only">{c.error}</span>}
-            <button type="button" className="icon-btn small" aria-label="Remove this photo from the tray" onClick={() => onRemoveCapture(draft.id, c.localId)}>
+            {c.status !== "saved" && <button type="button" className="icon-btn small" aria-label="Dismiss this unsaved photo" onClick={() => onRemoveCapture(draft.id, c.localId)}>
               <Trash2 size={14} aria-hidden="true" />
-            </button>
+            </button>}
           </li>
         ))}
       </ul>
@@ -71,16 +72,16 @@ function DraftCard({ draft, active, cameraOn, onSelect, onCapture, onUpload, onR
       )}
 
       <div className="draft-actions">
-        <button type="button" className="btn ghost" disabled={!cameraOn} onClick={() => onCapture(draft.id)} title={cameraOn ? undefined : "Turn your camera on to take a photo"}>
+        <button type="button" className="btn ghost" disabled={!cameraOn || draft.approved} onClick={() => onCapture(draft.id)} title={cameraOn ? undefined : "Turn your camera on to take a photo"}>
           {draft.captures.length ? <RotateCcw size={16} aria-hidden="true" /> : <Camera size={16} aria-hidden="true" />}
           {draft.captures.length ? "Retake" : "Take photo"}
         </button>
         <label className="btn ghost" htmlFor={`${uid}-file`}>
           <Upload size={16} aria-hidden="true" /> Upload
         </label>
-        <input id={`${uid}-file`} className="sr-only" type="file" accept="image/jpeg,image/png,image/webp"
+        <input id={`${uid}-file`} className="sr-only" type="file" accept="image/jpeg,image/png,image/webp" disabled={draft.approved}
           onChange={e => { const f = e.target.files?.[0]; if (f) onUpload(draft.id, f); e.target.value = ""; }} />
-        <button type="button" className="btn ghost" aria-expanded={editing} onClick={() => setEditing(v => !v)}>Edit details</button>
+        <button type="button" className="btn ghost" aria-expanded={editing} disabled={draft.approved} onClick={() => setEditing(v => !v)}>Edit details</button>
       </div>
       {editing && <DraftEditor draft={draft} onDone={() => setEditing(false)} onSave={patch => onSave(draft.id, patch)} />}
     </li>
@@ -90,7 +91,6 @@ function DraftCard({ draft, active, cameraOn, onSelect, onCapture, onUpload, onR
 function DraftEditor({ draft, onSave, onDone }: { draft: DraftView; onSave: (p: DraftPatch) => Promise<string | null>; onDone: () => void }) {
   const [title, setTitle] = useState(draft.title);
   const [price, setPrice] = useState(draft.priceMinor !== null ? (draft.priceMinor / 100).toFixed(2) : "");
-  const [tracked, setTracked] = useState(draft.inventoryTracked !== false);
   const [qty, setQty] = useState(draft.quantityOnHand?.toString() ?? "");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -99,10 +99,10 @@ function DraftEditor({ draft, onSave, onDone }: { draft: DraftView; onSave: (p: 
     e.preventDefault();
     const priceMinor = price.trim() === "" ? undefined : parsePriceToMinor(price);
     if (priceMinor === null) return setError("Enter a price like 24 or 24.50.");
-    const quantity = tracked ? Number(qty) : null;
-    if (tracked && (!/^\d+$/.test(qty.trim()) || !Number.isSafeInteger(quantity))) return setError("Enter a whole number of items in stock, or untick stock tracking.");
+    const quantity = Number(qty);
+    if (!/^\d+$/.test(qty.trim()) || !Number.isSafeInteger(quantity)) return setError("Enter the exact whole number of items available. Zero means sold out.");
     setBusy(true);
-    const err = await onSave({ title: title.trim() || undefined, priceMinor, inventoryTracked: tracked, quantityOnHand: quantity });
+    const err = await onSave({ title: title.trim() || undefined, priceMinor, inventoryTracked: true, quantityOnHand: quantity });
     setBusy(false);
     if (err) setError(err);
     else onDone();
@@ -112,8 +112,7 @@ function DraftEditor({ draft, onSave, onDone }: { draft: DraftView; onSave: (p: 
     <form className="draft-editor" onSubmit={submit}>
       <label className="field"><span>Name</span><input value={title} maxLength={160} onChange={e => setTitle(e.target.value)} /></label>
       <label className="field"><span>Price ({draft.currencyCode})</span><input inputMode="decimal" value={price} onChange={e => setPrice(e.target.value)} /></label>
-      <label className="check"><input type="checkbox" checked={tracked} onChange={e => setTracked(e.target.checked)} /> Track stock</label>
-      {tracked && <label className="field"><span>In stock</span><input inputMode="numeric" value={qty} onChange={e => setQty(e.target.value)} /></label>}
+      <label className="field"><span>In stock</span><input inputMode="numeric" value={qty} onChange={e => setQty(e.target.value)} /></label>
       {error && <p className="error" role="alert">{error}</p>}
       <div className="draft-actions">
         <button className="btn primary" type="submit" disabled={busy}>{busy ? "Saving…" : "Save"}</button>

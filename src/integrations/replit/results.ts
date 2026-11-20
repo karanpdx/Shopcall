@@ -7,7 +7,7 @@ export const responseProfileSchema = z.object({
   verifiedAt: z.iso.datetime(),
   creationIdPath: path,
   build: z.object({ statusPath: path, readyValues: z.array(z.string()).min(1), pendingValues: z.array(z.string()), failedValues: z.array(z.string()) }).strict().optional(),
-  publication: z.object({ statusPath: path, readyValues: z.array(z.string()).min(1), pendingValues: z.array(z.string()), failedValues: z.array(z.string()), urlPath: path }).strict(),
+  publication: z.object({ statusPath: path, readyValues: z.array(z.string()).min(1), pendingValues: z.array(z.string()), failedValues: z.array(z.string()), urlPath: path, presencePath: path.optional() }).strict(),
 }).strict();
 export type ReplitResponseProfile = z.infer<typeof responseProfileSchema>;
 export type CreationResult = { state: "created"; replId: string } | { state: "blocked"; reason: string };
@@ -45,6 +45,11 @@ export function parseReadinessResult(raw: ReplitToolResult, profile?: ReplitResp
 export function parsePublishResult(raw: ReplitToolResult, profile?: ReplitResponseProfile): PublishResult {
   if (!profile) return { state: "blocked", reason: "Replit publication output schema has not been verified against this account." };
   const verified = responseProfileSchema.parse(profile);
+  if (verified.publication.presencePath) {
+    const found = read(raw.structuredContent, verified.publication.presencePath);
+    if (found === false) return { state: "pending" };
+    if (found !== true) return { state: "blocked", reason: "Provider publication presence does not match verified response profile." };
+  }
   const result = status(read(raw.structuredContent, verified.publication.statusPath), verified.publication);
   if (result.state !== "ready") return result;
   const rawUrl = read(raw.structuredContent, verified.publication.urlPath);

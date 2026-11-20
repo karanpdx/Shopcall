@@ -1,6 +1,6 @@
 import { CallScreen } from "../features/call/components/CallScreen";
 
-/** The whole app is one button: open it, tap the orb, talk. */
+/** Authenticated voice-first physical inventory intake and ongoing storefront maintenance. */
 export default function Home() {
   return <CallScreen />;
 }

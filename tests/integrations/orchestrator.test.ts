@@ -11,9 +11,8 @@ const brief = {
 };
 const now = new Date("2026-11-20T22:00:00Z");
 function observations(plan: StorefrontPlan): TaskEvidence[] {
-  const source: Record<string, TaskEvidence["source"]> = { design: "artifact-review", frontend: "browser-check", catalogIntegration: "network-check", qa: "independent-review" };
-  return plan.tasks.filter(task => task.id !== "deploy").map((task, index) => ({
-    planId: plan.id, taskId: task.id, replId: "repl-1", source: source[task.id],
+  return plan.tasks.slice(0, 3).map((task, index) => ({
+    planId: plan.id, taskId: task.id, replId: "repl-1", source: "artifact-review",
     observedAt: new Date(now.getTime() - (10 - index) * 60_000).toISOString(), outcome: "passed", artifactRef: `artifact:${task.id}`, checks: [...task.acceptanceCriteria],
   }));
 }
@@ -21,7 +20,8 @@ function observations(plan: StorefrontPlan): TaskEvidence[] {
 test("plan is deterministic, serial and bound to approved catalog snapshot", () => {
   const plan = createStorefrontPlan(brief);
   assert.deepEqual(createStorefrontPlan(brief), plan);
-  assert.deepEqual(plan.tasks.map(task => task.dependsOn), [[], ["design"], ["frontend"], ["catalogIntegration"], ["qa"]]);
+  assert.deepEqual(plan.tasks.map(task => task.dependsOn), [[], ["design"], ["frontend"], ["catalogIntegration"], ["deploy"]]);
+  assert.deepEqual(plan.tasks.map(task => task.id), ["design", "frontend", "catalogIntegration", "deploy", "qa"]);
   assert.notEqual(createStorefrontPlan({ ...brief, catalogRevision: 4 }).id, plan.id);
   plan.tasks[1].dependsOn = [];
   assert.throws(() => assertPlanIntegrity(plan), /modified/);
@@ -41,7 +41,11 @@ test("prompts preserve single app/external catalog boundary and do not permit de
   assert.match(prompt, /data-shopcall-product=product.id/);
   assert.match(prompt, /data-shopcall-plan=planId/);
   assert.match(prompt, /GET \/api\/shopcall\/catalog/);
-  assert.match(prompt, /returns the live PublicCatalog unchanged/);
+  assert.match(prompt, /returns the normalized live PublicCatalog projection/);
+  assert.match(prompt, /actual backend wire format/);
+  assert.match(prompt, /priceMinor=priceCents/);
+  assert.match(prompt, /Drop only these non-projected metadata fields/);
+  assert.match(prompt, /STATIC artifact preflight/);
   assert.match(buildReplitCreationPrompt(plan), /same app/);
   assert.throws(() => buildTaskPrompt(plan, "deploy"), /controller-owned/);
 });
@@ -79,6 +83,7 @@ test("specialist progression requires a fully verified completed prefix", () => 
   assert.equal(evaluateTaskGate(plan, [equalTimeFailure, entries[0]], "repl-1", "design", now).allowed, true);
   const wrongSource = { ...entries[0], source: "provider-build-status" as const };
   assert.equal(evaluateTaskGate(plan, [wrongSource], "repl-1", "design", now).allowed, false);
+  assert.equal(evaluateTaskGate(plan, [{ ...entries[0], source: "browser-check" }], "repl-1", "design", now).allowed, false);
 });
 
 test("evidence from wrong app/snapshot, stale time, failure and dependency disorder block publication", () => {
@@ -93,7 +98,7 @@ test("evidence from wrong app/snapshot, stale time, failure and dependency disor
   const outOfOrder = observations(plan);
   outOfOrder[1].observedAt = "2026-11-20T21:40:00Z";
   assert.equal(evaluateDeploymentGate(plan, outOfOrder, "repl-1", now).allowed, false);
-  const laterFailure = { ...observations(plan)[3], outcome: "failed" as const, observedAt: "2026-11-20T21:59:00Z" };
+  const laterFailure = { ...observations(plan)[2], outcome: "failed" as const, observedAt: "2026-11-20T21:59:00Z" };
   assert.equal(evaluateDeploymentGate(plan, [...observations(plan), laterFailure], "repl-1", now).allowed, false);
 });
 
@@ -103,6 +108,11 @@ test("published readiness separates provider status from anonymous page proof", 
   assert.equal(evaluatePublishedGate(plan, entries, "repl-1", now).allowed, false);
   const published: TaskEvidence = { planId: plan.id, taskId: "deploy", replId: "repl-1", source: "provider-publish-status", observedAt: "2026-11-20T21:58:00Z", outcome: "passed", artifactRef: "artifact:publish", checks: ["provider-published"] };
   assert.equal(evaluatePublishedGate(plan, [...entries, published], "repl-1", now).allowed, false);
+  const qa: TaskEvidence = { ...published, taskId: "qa", source: "browser-check", observedAt: "2026-11-20T21:58:30Z", artifactRef: "https://store.example.com/", checks: plan.tasks.find(task => task.id === "qa")!.acceptanceCriteria };
   const publicPage: TaskEvidence = { ...published, source: "browser-check", observedAt: "2026-11-20T21:59:00Z", artifactRef: "https://store.example.com/", checks: ["anonymous-public-url", "correct-live-business-catalog"] };
-  assert.equal(evaluatePublishedGate(plan, [...entries, published, publicPage], "repl-1", now).allowed, true);
+  assert.equal(evaluatePublishedGate(plan, [...entries, published, publicPage], "repl-1", now).allowed, false);
+  assert.equal(evaluateTaskGate(plan, [...entries, published, qa], "repl-1", "qa", now).allowed, true);
+  assert.equal(evaluatePublishedGate(plan, [...entries, published, qa, publicPage], "repl-1", now).allowed, true);
+  assert.equal(evaluatePublishedGate(plan, [...entries, published, { ...qa, source: "artifact-review" }, publicPage], "repl-1", now).allowed, false);
+  assert.equal(evaluatePublishedGate(plan, [...entries, published, { ...qa, observedAt: "2026-11-20T21:57:00Z" }, publicPage], "repl-1", now).allowed, false);
 });

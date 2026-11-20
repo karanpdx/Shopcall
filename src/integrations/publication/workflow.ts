@@ -111,7 +111,7 @@ export class PublicationWorkflow {
         assertPlanIntegrity(run.plan);
         const approved = createStorefrontPlan(await this.authorization.getApprovedBrief(run.approval));
         if (approved.snapshotHash !== run.plan.snapshotHash) return save({ phase: "blocked", errorCode: "APPROVAL_SNAPSHOT_CHANGED" });
-        const tasks = run.plan.tasks.filter(task => task.id !== "deploy");
+        const tasks = run.plan.tasks.filter(task => task.id !== "deploy" && task.id !== "qa");
         if (run.phase === "queued") {
           await save({ phase: "dispatching", currentTaskId: tasks[0].id });
           const result = await this.replit.createApp(buildReplitCreationPrompt(run.plan));
@@ -160,16 +160,22 @@ export class PublicationWorkflow {
           const url = new URL(result.publicUrl);
           if (url.protocol !== "https:" || url.username || url.password || url.search || url.hash) return save({ phase: "blocked", errorCode: "INVALID_PUBLIC_URL" });
           const publicationEvidence: TaskEvidence = { planId: run.plan.id, taskId: "deploy", replId: run.replId, source: "provider-publish-status", outcome: "passed", observedAt: this.now().toISOString(), artifactRef: url.href, checks: ["provider-published"] };
-          return save({ phase: "verifying", candidateUrl: url.href, evidence: [...run.evidence, publicationEvidence], waitingSince: this.now().toISOString() });
+          return save({ phase: "verifying", currentTaskId: "qa", candidateUrl: url.href, evidence: [...run.evidence, publicationEvidence], waitingSince: this.now().toISOString() });
         }
         if (run.phase === "verifying") {
           if (run.waitingSince && this.now().getTime() - Date.parse(run.waitingSince) > this.waitTimeoutMs) return save({ phase: "failed", errorCode: "VERIFICATION_TIMEOUT" });
           if (!run.candidateUrl) return save({ phase: "blocked", errorCode: "PUBLIC_URL_MISSING" });
+          const qa = run.plan.tasks.find(task => task.id === "qa")!;
+          const qaObservation = await this.replit.observeTask(run, qa);
+          if (qaObservation.state === "pending") return run;
+          if (qaObservation.state !== "passed") return save({ phase: qaObservation.state, errorCode: qaObservation.code });
+          const qaEvidence = validateTaskEvidence(qaObservation.evidence);
+          if (!evaluateTaskGate(run.plan, [...run.evidence, qaEvidence], run.replId, "qa", this.now()).allowed) return save({ phase: "failed", errorCode: "POST_PUBLICATION_QA_FAILED" });
           const proof = await this.verifier.verify(run.candidateUrl, run.plan, run.replId);
           if (!proof.passed && proof.retryable && run.verificationAttempts < 3) {
             return save({ verificationAttempts: run.verificationAttempts + 1, verificationChecks: proof.checks, errorCode: "PUBLIC_VERIFICATION_RETRY_PENDING" });
           }
-          const evidence = [...run.evidence, ...proof.evidence.map(validateTaskEvidence)];
+          const evidence = [...run.evidence, qaEvidence, ...proof.evidence.map(validateTaskEvidence)];
           const required = ["anonymous-public-url", "correct-live-business-catalog", "current-product-prices-stock", "usable-original-images", "same-origin-live-catalog-proxy"];
           const accepted = proof.passed && Number.isInteger(proof.httpStatus) && proof.httpStatus! >= 200 && proof.httpStatus! <= 299 && Number.isSafeInteger(proof.catalogRevision) && proof.catalogRevision! >= run.plan.brief.catalogRevision && required.every(check => proof.checks.includes(check)) && evaluatePublishedGate(run.plan, evidence, run.replId, this.now()).allowed;
           return accepted

@@ -16,9 +16,9 @@ export type TaskEvidence = z.infer<typeof evidenceSchema>;
 export type DeploymentGate = { allowed: boolean; blockers: { taskId: TaskId; reason: string }[] };
 
 const allowedSources: Record<TaskId, TaskEvidence["source"][]> = {
-  design: ["artifact-review", "independent-review", "browser-check"],
-  frontend: ["browser-check", "independent-review", "provider-build-status"],
-  catalogIntegration: ["network-check", "browser-check", "independent-review"],
+  design: ["artifact-review", "independent-review"],
+  frontend: ["artifact-review", "independent-review"],
+  catalogIntegration: ["artifact-review", "independent-review"],
   qa: ["browser-check", "independent-review"],
   deploy: ["provider-publish-status", "browser-check"],
 };
@@ -38,17 +38,17 @@ function currentEvidence(plan: StorefrontPlan, entries: TaskEvidence[], replId: 
 
 /**
  * Pre-publication gate. Evidence originates in a trusted backend EvidenceVerifier port,
- * never merchant inputs, Replit ask_question prose, or a generated app's self-attestation.
- * This validates scope/coverage/freshness/order; it does not itself run a browser or provider.
+ * never merchant inputs or a generated app's uninspected completion claim.
+ * Prepublication source-artifact checks are static preflight, not browser acceptance.
  */
 export function evaluateDeploymentGate(plan: StorefrontPlan, entries: TaskEvidence[], replId: string, now = new Date()): DeploymentGate {
   assertPlanIntegrity(plan);
   const blockers: DeploymentGate["blockers"] = [];
   const observed = new Map<TaskId, TaskEvidence>();
-  for (const task of plan.tasks.filter(task => task.id !== "deploy")) {
+  for (const task of plan.tasks.slice(0, plan.tasks.findIndex(task => task.id === "deploy"))) {
     const latest = currentEvidence(plan, entries, replId, task.id, now)[0];
     if (!latest) {
-      blockers.push({ taskId: task.id, reason: "No fresh independent evidence for this exact plan and Replit app." });
+      blockers.push({ taskId: task.id, reason: "No fresh source-artifact evidence for this exact plan and Replit app." });
       continue;
     }
     if (latest.outcome !== "passed") {
@@ -76,13 +76,30 @@ export function evaluateTaskGate(plan: StorefrontPlan, entries: TaskEvidence[], 
   if (index < 0) throw new Error("Unknown storefront task.");
   const prefixIds = new Set(plan.tasks.slice(0, index + 1).map(task => task.id));
   const blockers = evaluateDeploymentGate(plan, entries, replId, now).blockers.filter(blocker => prefixIds.has(blocker.taskId));
+  if (taskId === "qa") {
+    const task = plan.tasks[index];
+    const publication = currentEvidence(plan, entries, replId, "deploy", now).find(entry => entry.source === "provider-publish-status");
+    const qa = currentEvidence(plan, entries, replId, "qa", now)[0];
+    const lastStatic = currentEvidence(plan, entries, replId, "catalogIntegration", now)[0];
+    if (!publication || publication.outcome !== "passed" || !publication.checks.includes("provider-published")) {
+      blockers.push({ taskId: "qa", reason: "Actual provider publication must precede rendered QA." });
+    }
+    if (!qa || qa.outcome !== "passed" || task.acceptanceCriteria.some(check => !qa.checks.includes(check))) {
+      blockers.push({ taskId: "qa", reason: "Real postpublication browser QA lacks current complete acceptance evidence." });
+    }
+    if (publication && qa && Date.parse(qa.observedAt) < Date.parse(publication.observedAt)) {
+      blockers.push({ taskId: "qa", reason: "QA evidence predates actual provider publication." });
+    }
+    if (publication && lastStatic && Date.parse(publication.observedAt) < Date.parse(lastStatic.observedAt)) {
+      blockers.push({ taskId: "deploy", reason: "Publication predates completed source-artifact preflight." });
+    }
+  }
   return { allowed: blockers.length === 0, blockers };
 }
 
 /** Published readiness needs actual provider status AND anonymous public-page observations. */
 export function evaluatePublishedGate(plan: StorefrontPlan, entries: TaskEvidence[], replId: string, now = new Date()): DeploymentGate {
-  const beforePublish = evaluateDeploymentGate(plan, entries, replId, now);
-  const blockers = [...beforePublish.blockers];
+  const blockers = [...evaluateTaskGate(plan, entries, replId, "qa", now).blockers];
   const deploy = currentEvidence(plan, entries, replId, "deploy", now);
   const publication = deploy.find(entry => entry.source === "provider-publish-status");
   const browser = deploy.find(entry => entry.source === "browser-check");
@@ -96,8 +113,8 @@ export function evaluatePublishedGate(plan: StorefrontPlan, entries: TaskEvidenc
     blockers.push({ taskId: "deploy", reason: "Public verification must follow provider publication." });
   }
   const qa = currentEvidence(plan, entries, replId, "qa", now)[0];
-  if (publication && qa && Date.parse(publication.observedAt) < Date.parse(qa.observedAt)) {
-    blockers.push({ taskId: "deploy", reason: "Publication evidence predates completed QA." });
+  if (browser && qa && Date.parse(browser.observedAt) < Date.parse(qa.observedAt)) {
+    blockers.push({ taskId: "deploy", reason: "Final public verification predates completed rendered QA." });
   }
   return { allowed: blockers.length === 0, blockers };
 }

@@ -8,12 +8,15 @@
     "build": "next build",
     "start": "next start --hostname 0.0.0.0",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test tests/*.test.ts tests/integrations/*.test.ts",
+    "test": "tsx --test tests/*.test.ts tests/integrations/*.test.ts tests/ui/*.test.ts",
     "agent:setup": "node --env-file=.env.local --import tsx scripts/setup-agent.ts",
+    "agent:sync": "node --env-file=.env.local --import tsx scripts/sync-agent.ts",
     "worker": "node --env-file=.env.local --import tsx scripts/worker.ts",
     "replit:connect": "node --env-file=.env.local --import tsx scripts/replit-connect.ts",
     "replit:check": "node --env-file=.env.local --import tsx scripts/replit-check.ts",
-    "replit:probe": "node --env-file=.env.local --import tsx scripts/replit-probe.ts"
+    "replit:probe": "node --env-file=.env.local --import tsx scripts/replit-probe.ts",
+    "demo:setup": "node --env-file-if-exists=.env.local --import tsx scripts/demo-setup.ts",
+    "demo:smoke": "node --env-file=.env.local --import tsx scripts/demo-smoke.ts"
   },
   "dependencies": {
     "@elevenlabs/elevenlabs-js": "^2.79.0",

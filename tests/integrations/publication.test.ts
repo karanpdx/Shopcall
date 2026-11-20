@@ -43,9 +43,9 @@ test("ordered specialist tasks use one app and ready requires provider plus publ
   const runId = randomUUID();
   await workflow.enqueue(runId, approval);
   const phases: string[] = [];
-  for (let tick = 0; tick < 8; tick++) phases.push((await workflow.step(runId)).phase);
-  assert.deepEqual(phases, ["awaiting_task", "awaiting_task", "awaiting_task", "awaiting_task", "ready_to_publish", "publishing", "verifying", "ready"]);
-  assert.deepEqual(calls, { create: 1, update: 3, publish: 1 });
+  for (let tick = 0; tick < 7; tick++) phases.push((await workflow.step(runId)).phase);
+  assert.deepEqual(phases, ["awaiting_task", "awaiting_task", "awaiting_task", "ready_to_publish", "publishing", "verifying", "ready"]);
+  assert.deepEqual(calls, { create: 1, update: 2, publish: 1 });
   const repeated = await workflow.step(runId);
   assert.equal(repeated.publicUrl, "https://studio.replit.app/");
   assert.equal(calls.publish, 1);
@@ -146,12 +146,12 @@ test("catalog drift retries verification on same app without republishing", asyn
   };
   const id = randomUUID();
   await workflow.enqueue(id, approval);
-  for (let tick = 0; tick < 7; tick++) await workflow.step(id);
+  for (let tick = 0; tick < 6; tick++) await workflow.step(id);
   const retry = await workflow.step(id);
   assert.equal(retry.phase, "verifying");
   assert.equal(retry.verificationAttempts, 1);
   assert.equal((await workflow.step(id)).phase, "ready");
-  assert.deepEqual(calls, { create: 1, update: 3, publish: 1 });
+  assert.deepEqual(calls, { create: 1, update: 2, publish: 1 });
 });
 
 test("notification source requires actual persisted verification, verified owner and current observed revision", async t => {

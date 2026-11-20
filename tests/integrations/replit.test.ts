@@ -108,13 +108,12 @@ test("provider errors never pass through as successful tool calls", async () => 
   await assert.rejects(client.getPublishStatus("id"), error => error instanceof Error && !error.message.includes("provider-secret") && error.message.includes("provider error"));
 });
 
-test("artifact adapter rejects credential paths and validates actual preview arguments", async () => {
+test("artifact adapter rejects credential paths and internal widget capabilities", async () => {
   const invoked: string[] = [];
   const client = ReplitMcpClient.fromClient({
     listTools: async () => ({ tools: [
       { name: "read_app_file", inputSchema: { type: "object", properties: { replId: { type: "string" }, path: { type: "string" } }, required: ["replId", "path"], additionalProperties: false } },
       { name: "list_app_files", inputSchema: { type: "object", properties: { replId: { type: "string" }, path: { type: "string" } }, required: ["replId"], additionalProperties: false } },
-      { name: "replit_widget_get_preview_url", inputSchema: { type: "object", properties: { replId: { type: "string" }, gitSha: { type: "string" }, timestamp: { type: "string" } }, required: ["replId", "gitSha", "timestamp"], additionalProperties: false } },
     ] as Tool[] }),
     callTool: async ({ name }) => { invoked.push(name); return { content: [] }; },
     close: async () => {},
@@ -124,7 +123,41 @@ test("artifact adapter rejects credential paths and validates actual preview arg
   }
   await client.readAppFile("app", "src/App.tsx");
   await client.listAppFiles("app", "src/");
-  await client.getPreviewUrl({ replId: "app", gitSha: "actual-observed-commit", timestamp: "actual-observed-timestamp" });
-  assert.deepEqual(invoked, ["read_app_file", "list_app_files", "replit_widget_get_preview_url"]);
-  await assert.rejects(client.call("replit_widget_get_auth_token", { replId: "app" }), /outside Shopcall/);
+  assert.deepEqual(invoked, ["read_app_file", "list_app_files"]);
+  for (const internal of ["replit_widget_get_auth_token", "replit_widget_get_preview_url", "replit_widget_start_app_preview"]) {
+    await assert.rejects(client.call(internal, { replId: "app" }), /outside Shopcall/);
+  }
+});
+
+test("transient source reads retry boundedly while publication mutations never replay", async () => {
+  const counts = { read: 0, publish: 0 };
+  const client = ReplitMcpClient.fromClient({
+    listTools: async () => ({ tools: [
+      { name: "read_app_file", inputSchema: { type: "object" } },
+      { name: "publish_app", inputSchema: { type: "object" } },
+    ] }),
+    callTool: async ({ name }) => {
+      if (name === "read_app_file") {
+        counts.read++;
+        return counts.read === 1 ? { isError: true, content: [] } : { content: [{ type: "text", text: "export const source = true;" }] };
+      }
+      counts.publish++;
+      throw new Error("ambiguous remote mutation outcome");
+    },
+    close: async () => {},
+  });
+  await client.readAppFile("app", "src/App.tsx");
+  await assert.rejects(client.publishApp("app"), /reconcile remote outcome/);
+  assert.deepEqual(counts, { read: 2, publish: 1 });
+});
+
+test("verified publication presence false remains pending before status is available", () => {
+  const profile: ReplitResponseProfile = {
+    verifiedAt: "2026-11-20T00:00:00Z", creationIdPath: ["replId"],
+    publication: { presencePath: ["found"], statusPath: ["status"], urlPath: ["url"], readyValues: ["success"], pendingValues: ["pending"], failedValues: ["failed", "suspended"] },
+  };
+  assert.deepEqual(parsePublishResult({ content: [], structuredContent: { found: false } }, profile), { state: "pending" });
+  assert.equal(parsePublishResult({ content: [], structuredContent: { status: "success", url: "https://shop.replit.app" } }, profile).state, "blocked");
+  assert.equal(parsePublishResult({ content: [], structuredContent: { found: "false" } }, profile).state, "blocked");
+  assert.deepEqual(parsePublishResult({ content: [], structuredContent: { found: true, status: "success", url: "https://shop.replit.app" } }, profile), { state: "ready", publicUrl: "https://shop.replit.app/" });
 });

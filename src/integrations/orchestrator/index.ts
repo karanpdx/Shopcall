@@ -4,3 +4,5 @@ export { validateTaskEvidence, evaluateTaskGate, evaluateDeploymentGate, evaluat
 export type { TaskEvidence, DeploymentGate } from "./evidence";
 export { ConfiguredPreviewLocator, PlaywrightPreviewInspector, AutomaticStorefrontTaskObserver } from "./observer";
 export type { PreviewLocator, PreviewInspector, PreviewInspection, PreviewNetworkVerifier } from "./observer";
+export { parseCanonicalCatalog, getExpectedPublicSlug, normalizedPublicCatalog } from "./catalog-normalization";
+export type { NormalizedPublicCatalog } from "./catalog-normalization";

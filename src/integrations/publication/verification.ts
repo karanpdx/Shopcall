@@ -1,16 +1,8 @@
 import { chromium, type Browser } from "playwright-core";
-import { z } from "zod";
-import { productFields } from "../../contracts/catalog";
-import type { StorefrontPlan, TaskEvidence } from "../orchestrator";
+import { parseCanonicalCatalog, type NormalizedPublicCatalog, type StorefrontPlan, type TaskEvidence } from "../orchestrator";
 import type { StorefrontVerifier } from "./workflow";
 
-const publicProduct = productFields.safeExtend({ id: z.uuid(), imageUrl: z.url().nullable() });
-const publicCatalog = z.object({
-  business: z.object({ id: z.uuid(), name: z.string(), description: z.string(), contactEmail: z.email(), currencyCode: z.string().regex(/^[A-Z]{3}$/) }).strict(),
-  revision: z.number().int().nonnegative(),
-  products: z.array(publicProduct).max(500),
-}).strict();
-export type VerificationCatalog = z.infer<typeof publicCatalog>;
+export type VerificationCatalog = NormalizedPublicCatalog;
 
 class CatalogChanged extends Error {}
 function requireUncached(response: Response) {
@@ -122,10 +114,10 @@ export class AnonymousStorefrontVerifier implements StorefrontVerifier {
       const storefront = allowedPublicUrl(value, this.trustedOrigins);
       const canonicalUrl = allowedPublicUrl(plan.brief.publicCatalogUrl, this.trustedOrigins);
       const get = (url: string) => this.request(url, { redirect: "manual", credentials: "omit", cache: "no-store", signal: AbortSignal.timeout(15_000), headers: { Accept: "application/json, text/html, image/*" } });
-      const original = publicCatalog.parse(JSON.parse((await body(requireUncached(await get(canonicalUrl.href)), 2_000_000)).toString()));
+      const original = parseCanonicalCatalog(JSON.parse((await body(requireUncached(await get(canonicalUrl.href)), 2_000_000)).toString()), plan);
       if (original.business.id !== plan.brief.businessId || original.revision < plan.brief.catalogRevision || original.products.length === 0) throw new Error("Catalog identity or revision mismatch.");
       const proxy = new URL("/api/shopcall/catalog", storefront);
-      const proxyCatalog = publicCatalog.parse(JSON.parse((await body(requireUncached(await get(proxy.href)), 2_000_000)).toString()));
+      const proxyCatalog = parseCanonicalCatalog(JSON.parse((await body(requireUncached(await get(proxy.href)), 2_000_000)).toString()), plan);
       if (JSON.stringify(proxyCatalog) !== JSON.stringify(original)) throw new Error("Storefront proxy is stale or differs from canonical catalog.");
       checks.push("same-origin-live-catalog-proxy");
       const htmlResponse = requireUncached(await get(storefront.href));
@@ -142,7 +134,7 @@ export class AnonymousStorefrontVerifier implements StorefrontVerifier {
       checks.push("usable-original-images");
       if (!await this.browser.inspect(storefront.href, original, this.trustedOrigins)) throw new Error("Rendered storefront check failed.");
       // Avoid accepting an apparent stale site if catalog changed while checks were in flight.
-      const after = publicCatalog.parse(JSON.parse((await body(requireUncached(await get(canonicalUrl.href)), 2_000_000)).toString()));
+      const after = parseCanonicalCatalog(JSON.parse((await body(requireUncached(await get(canonicalUrl.href)), 2_000_000)).toString()), plan);
       if (JSON.stringify(after) !== JSON.stringify(original)) throw new CatalogChanged("Catalog changed during verification; retry with a fresh snapshot.");
       checks.push("correct-live-business-catalog", "current-product-prices-stock");
       evidence.push({ planId: plan.id, taskId: "deploy", replId, source: "browser-check", observedAt: this.now().toISOString(), outcome: "passed", artifactRef: storefront.href, checks: ["anonymous-public-url", "correct-live-business-catalog"] });

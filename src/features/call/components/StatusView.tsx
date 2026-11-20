@@ -2,8 +2,8 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { ExternalLink } from "lucide-react";
-import type { BuildJob, BuildPhase } from "../../../contracts/integrations";
-import { createApiClient, type ApiError } from "../api";
+import type { BuildPhase } from "../../../contracts/integrations";
+import { createApiClient, type ApiError, type UiBuildStatus } from "../api";
 import { isTerminal, phaseSteps, verifiedUrl } from "../status";
 
 const POLL_MS = 4000;
@@ -16,7 +16,7 @@ const LABEL: Record<BuildPhase, string> = {
 
 export function StatusView({ jobId }: { jobId: string | null }) {
   const api = useMemo(() => createApiClient(), []);
-  const [job, setJob] = useState<BuildJob | null>(null);
+  const [job, setJob] = useState<UiBuildStatus | null>(null);
   const [error, setError] = useState<ApiError | null>(null);
 
   useEffect(() => {
@@ -39,7 +39,7 @@ export function StatusView({ jobId }: { jobId: string | null }) {
   const url = job ? verifiedUrl(job) : null;
   return (
     <div className="panel status-panel">
-      <h1 className="page-title">{job?.phase === "ready" ? "Your storefront is live" : job?.phase === "failed" ? "Your storefront wasn't published" : "Your storefront is being built"}</h1>
+      <h1 className="page-title">{job?.requiresAttention ? "Your build needs attention" : job?.phase === "ready" ? "Your storefront is live" : job?.phase === "failed" ? "Your storefront wasn't published" : "Your storefront is being built"}</h1>
       {error && <p className="error" role="alert">{error.code === "UNAUTHORIZED" ? "Please sign in to see this status." : error.message}</p>}
       {!job && !error && <p className="muted" role="status">Checking status…</p>}
       {job && (
@@ -53,12 +53,12 @@ export function StatusView({ jobId }: { jobId: string | null }) {
           {url && <a className="btn primary" href={url} target="_blank" rel="noreferrer">Open your storefront <ExternalLink size={16} aria-hidden="true" /></a>}
           {job.phase === "failed" && (
             <div className="failure">
-              <p>Your store details are saved, but nothing is live yet.</p>
+              <p>Your listings are saved. This attempt did not produce a verified public link.</p>
               {job.error && <p className="error">{job.error}</p>}
               <Link className="btn ghost" href="/">Call again</Link>
             </div>
           )}
-          {!isTerminal(job.phase) && <p className="muted">You can leave this page. We&apos;ll email you when the link is verified.</p>}
+          {!isTerminal(job.phase) && <p className="muted">You can leave this page and return for the verified link. Email delivery depends on the configured sender.</p>}
         </>
       )}
     </div>

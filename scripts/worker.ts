@@ -1,37 +1,29 @@
-import { pathToFileURL } from "node:url";
-import { resolve } from "node:path";
 import { z } from "zod";
-import type { PublicationWorkflow } from "../src/integrations/publication/workflow";
-import type { PublicationNotificationWorker } from "../src/integrations/publication/notifications";
+import { setTimeout as pause } from "node:timers/promises";
+import { createBackendRuntime } from "../src/integrations/backend/runtime";
 
-// The runtime factory is local deployment configuration, never a merchant/tool input.
-// B supplies production auth/approval/run-store adapters. One tick is safe for queue scheduling.
 const args = process.argv.slice(2);
-const runId = args[0] === "--run" ? args[1] : undefined;
-if (!runId || !z.uuid().safeParse(runId).success || args.length !== 2 || !process.env.SHOPCALL_RUNTIME_MODULE) {
-  console.error("Usage: npm run worker -- --run <uuid>. Configure SHOPCALL_RUNTIME_MODULE exporting createPublicationRuntime(); see publication-handoff.md.");
+const mode = args[0] ?? "--once";
+if (!(["--once", "--loop"].includes(mode) && args.length <= 1 || mode === "--run" && args.length === 2 && z.uuid().safeParse(args[1]).success)) {
+  console.error("Usage: npm run worker -- --once | --run <job-uuid> | --loop");
   process.exitCode = 1;
 } else {
+  let stopping = false;
+  process.once("SIGINT", () => { stopping = true; });
+  process.once("SIGTERM", () => { stopping = true; });
   try {
-    const configured = resolve(process.env.SHOPCALL_RUNTIME_MODULE);
-    const runtime = await import(pathToFileURL(configured).href) as {
-      createPublicationRuntime(): Promise<{ workflow: PublicationWorkflow; notifications?: PublicationNotificationWorker; close?: () => Promise<void> }>;
-    };
-    const { workflow, notifications, close } = await runtime.createPublicationRuntime();
+    const runtime = createBackendRuntime();
     try {
-      const run = await workflow.step(runId);
-      // Never log owner/approval details, provider payloads, session URLs, or OAuth secrets.
-      console.log(JSON.stringify({ runId: run.id, phase: run.phase, task: run.currentTaskId, errorCode: run.errorCode }));
-      if (run.phase === "ready") {
-        if (notifications) {
-          try { console.log(JSON.stringify({ runId: run.id, notification: await notifications.step(run.id) })); }
-          catch { console.error("Verified storefront is ready, but notification processing failed. Retry notification worker without rebuilding."); process.exitCode = 1; }
-        } else console.log(JSON.stringify({ runId: run.id, notification: "not_configured" }));
-      }
-      if (run.phase === "blocked" || run.phase === "failed") process.exitCode = 1;
-    } finally { await close?.(); }
+      do {
+        const result = await runtime.tick(mode === "--run" ? { runId: args[1] } : {});
+        // Status projection only: no raw provider bodies, OAuth/session URLs or emails.
+        console.log(JSON.stringify(result));
+        if (mode !== "--loop") { if (["blocked", "failed", "not_found"].includes(result.phase)) process.exitCode = 1; break; }
+        if (!stopping) await pause(5000);
+      } while (!stopping);
+    } finally { await runtime.close(); }
   } catch {
-    console.error("Publication worker could not execute this run. Check configured runtime adapters and persisted state.");
+    console.error("Backend worker could not initialize. Check database, public backend URL, Replit OAuth/profile, Chrome and durable storage configuration.");
     process.exitCode = 1;
   }
 }

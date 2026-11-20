@@ -10,7 +10,7 @@ export interface TaskObserver {
 
 export class ReplitPublicationAdapter implements ReplitBuildPort {
   private readonly profile: ReplitResponseProfile;
-  constructor(private readonly client: ReplitMcpPort, profile: ReplitResponseProfile, private readonly observer: TaskObserver) {
+  constructor(private readonly client: ReplitMcpPort, profile: ReplitResponseProfile, private readonly observer: TaskObserver, private readonly registerPublication?: (url: string) => void) {
     // Fail before remote mutations when output schemas have not yet been discovered/verified.
     this.profile = responseProfileSchema.parse(profile);
   }
@@ -26,7 +26,7 @@ export class ReplitPublicationAdapter implements ReplitBuildPort {
     const result = parsePublishResult(await this.client.getPublishStatus(replId), this.profile);
     if (result.state === "blocked") return { state: "blocked" as const, code: "PUBLISH_SCHEMA_UNVERIFIED" };
     if (result.state === "failed") return { state: "failed" as const, code: "PROVIDER_PUBLISH_FAILED" };
-    if (result.state === "ready") return result;
+    if (result.state === "ready") { this.registerPublication?.(result.publicUrl); return result; }
     return { state: "pending" as const };
   }
 }

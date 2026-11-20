@@ -21,11 +21,15 @@ export type DraftView = Required<Pick<DraftPatch, "title" | "description" | "cur
   quantityOnHand: number | null;
   inventoryTracked: boolean | null;
   captures: CaptureView[];
+  imageAssetId?: string | null;
+  proposalId?: string | null;
+  approved?: boolean;
 };
 
 export type DraftsState = { order: string[]; byId: Record<string, DraftView>; activeId: string | null };
 
 export type DraftsAction =
+  | { type: "reset" }
   | { type: "draft_saved"; draft: SavedDraft }
   | { type: "set_active"; draftId: string }
   | { type: "capture_started"; draftId: string; localId: string; previewUrl: string }
@@ -47,11 +51,15 @@ function updateCapture(state: DraftsState, draftId: string, localId: string, fn:
 
 export function draftsReducer(state: DraftsState, action: DraftsAction): DraftsState {
   switch (action.type) {
+    case "reset": return initialDrafts;
     case "draft_saved": {
       const { id, ...fields } = action.draft;
       const existing = state.byId[id] ?? blankDraft(id);
       const defined = Object.fromEntries(Object.entries(fields).filter(([, v]) => v !== undefined));
       const next = { ...existing, ...defined };
+      if (action.draft.imageUrl && action.draft.imageAssetId && !next.captures.some(c => c.captureId === action.draft.imageAssetId)) {
+        next.captures = [{ localId: `saved-${action.draft.imageAssetId}`, previewUrl: action.draft.imageUrl, thumbnailUrl: action.draft.imageUrl, captureId: action.draft.imageAssetId, status: "saved" }];
+      }
       const isNew = !state.byId[id];
       return {
         order: isNew ? [...state.order, id] : state.order,

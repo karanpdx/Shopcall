@@ -1,5 +1,6 @@
 import type { ElevenLabs } from "@elevenlabs/elevenlabs-js";
 import { shopcallClientTools } from "./tools";
+import { MERCHANT_CONVERSATION_RULES } from "./conversation-policy";
 
 export const SHOPCALL_AGENT_NAME = "Shopcall demo merchant assistant";
 export const SHOPCALL_AGENT_TAG = "shopcall-managed-v1";
@@ -24,7 +25,7 @@ export function shopcallAgentConfig(): ElevenLabs.conversationalAi.BodyCreateAge
     name: SHOPCALL_AGENT_NAME,
     tags: [SHOPCALL_AGENT_TAG],
     conversationConfig: {
-      agent: { firstMessage: "Hi! What would you like to do with your storefront today?", language: "en", prompt: { prompt: SHOPCALL_PROMPT, llm: "gpt-4o-mini", temperature: 0.2, enableParallelToolCalls: false, tools: shopcallClientTools } },
+      agent: { firstMessage: "Hi! What would you like to do with your storefront today?", language: "en", prompt: { prompt: `${SHOPCALL_PROMPT}\n\n# Concise intake policy\n${MERCHANT_CONVERSATION_RULES.map(rule => `- ${rule.text}`).join("\n")}\n\n# Current demo capabilities\nThis demo publishes USD listings with an exact stock count and an original photo. If the owner cannot provide one, save the incomplete draft and let them finish or leave; do not promise untracked/no-photo publication. Never keep the caller on the line to complete optional fields. If they say finish, stop asking optional questions and show review. They can end at any time. One combined approval is enough. Do not keep audio open while the storefront builds. The roughly two-minute intake is a pacing goal, never a hard limit or a measured result.`, llm: "gpt-4o-mini", temperature: 0.2, enableParallelToolCalls: false, tools: shopcallClientTools } },
       tts: { voiceId: "EXAVITQu4vr4xnSDxMaL", modelId: "eleven_flash_v2" },
       turn: { turnEagerness: "patient", turnTimeout: 10 },
       conversation: { maxDurationSeconds: 900 },

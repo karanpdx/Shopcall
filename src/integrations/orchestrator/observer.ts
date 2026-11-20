@@ -1,10 +1,9 @@
 import { chromium, type Browser } from "playwright-core";
-import { z } from "zod";
-import { productFields } from "../../contracts/catalog";
 import { allowedPublicUrl } from "../publication/verification";
 import type { BuildRun, TaskObservation } from "../publication/workflow";
 import { assertPlanIntegrity, type StorefrontPlan, type StorefrontTask } from "./plan";
 import { evaluateTaskGate, type TaskEvidence } from "./evidence";
+import { parseCanonicalCatalog } from "./catalog-normalization";
 
 export interface PreviewLocator { locate(replId: string): Promise<string | null> }
 export class ConfiguredPreviewLocator implements PreviewLocator {
@@ -21,13 +20,7 @@ export interface PreviewNetworkVerifier {
   verify(url: string, plan: StorefrontPlan, replId: string): Promise<{ passed: boolean; checks: string[] }>;
 }
 
-const canonicalSchema = z.object({
-  business: z.object({ id: z.uuid(), name: z.string(), description: z.string(), contactEmail: z.email(), currencyCode: z.string() }).strict(),
-  revision: z.number().int().nonnegative(),
-  products: z.array(productFields.safeExtend({ id: z.uuid(), imageUrl: z.url().nullable() })).min(1).max(500),
-}).strict();
-
-async function canonicalJson(response: Response) {
+async function canonicalJson(response: Response, plan: StorefrontPlan) {
   if (!response.ok || !response.body) throw new Error("Canonical catalog unavailable.");
   const reader = response.body.getReader();
   let size = 0;
@@ -41,7 +34,7 @@ async function canonicalJson(response: Response) {
       chunks.push(value);
     }
   } finally { await reader.cancel(); }
-  return canonicalSchema.parse(JSON.parse(Buffer.concat(chunks).toString()));
+  return parseCanonicalCatalog(JSON.parse(Buffer.concat(chunks).toString()), plan);
 }
 
 /** Actual read-only network + desktop/mobile DOM inspection, without relying on Agent claims. */
@@ -65,7 +58,7 @@ export class PlaywrightPreviewInspector implements PreviewInspector {
       ["canonical-api-runtime-fetch", "correct-business-identity", "fresh-revision", "no-private-data", "original-product-images", "same-origin-catalog-proxy", "live-catalog-network-request", "correct-prices-stock-images"].forEach(check => checks.add(check));
     }
     const get = (target: string) => this.request(target, { redirect: "manual", credentials: "omit", cache: "no-store", signal: AbortSignal.timeout(15_000) });
-    const canonical = await canonicalJson(await get(catalogUrl.href));
+    const canonical = await canonicalJson(await get(catalogUrl.href), plan);
     if (canonical.business.id !== plan.brief.businessId || canonical.revision < plan.brief.catalogRevision) throw new Error("Canonical snapshot identity mismatch.");
     const proxy = await get(new URL("/api/shopcall/catalog", url).href);
     const proxyNoStore = /(?:^|,)\s*no-store(?:\s*,|$)/i.test(proxy.headers.get("cache-control") ?? "");
@@ -160,7 +153,7 @@ export class PlaywrightPreviewInspector implements PreviewInspector {
         }, { state });
       }
       if (scenariosPassed) checks.add("honest-empty-error-states");
-      const after = await canonicalJson(await get(catalogUrl.href));
+      const after = await canonicalJson(await get(catalogUrl.href), plan);
       if (JSON.stringify(after) !== JSON.stringify(canonical)) throw new Error("Catalog changed during preview inspection.");
       return { observedChecks: [...checks], observedAt: this.now().toISOString(), artifactRef: url.href };
     } finally { await browser.close(); }
@@ -172,12 +165,13 @@ export class AutomaticStorefrontTaskObserver {
   constructor(private readonly locator: PreviewLocator, private readonly inspector: PreviewInspector, private readonly now = () => new Date()) {}
   async observe(run: BuildRun, task: StorefrontTask): Promise<TaskObservation> {
     assertPlanIntegrity(run.plan);
-    if (!run.replId || task.id === "deploy" || run.plan.tasks.find(item => item.id === task.id)?.role !== task.role) return { state: "blocked", code: "TASK_OBSERVER_SCOPE_INVALID" };
-    const preview = await this.locator.locate(run.replId);
-    if (!preview) return { state: "blocked", code: "REPLIT_PREVIEW_UNAVAILABLE" };
+    if (!run.replId || task.id !== "qa" || run.phase !== "verifying" || run.plan.tasks.find(item => item.id === task.id)?.role !== task.role) return { state: "blocked", code: "TASK_OBSERVER_SCOPE_INVALID" };
+    // Protected native preview is not a supported QA surface; inspect only actual publication output.
+    const preview = run.candidateUrl;
+    if (!preview) return { state: "pending" };
     try {
       const observation = await this.inspector.inspect(preview, run.plan, run.replId);
-      const evidence: TaskEvidence = { planId: run.plan.id, taskId: task.id, replId: run.replId, source: task.id === "catalogIntegration" ? "network-check" : "browser-check", observedAt: observation.observedAt, outcome: "passed", artifactRef: observation.artifactRef, checks: task.acceptanceCriteria.filter(check => observation.observedChecks.includes(check)) };
+      const evidence: TaskEvidence = { planId: run.plan.id, taskId: task.id, replId: run.replId, source: "browser-check", observedAt: observation.observedAt, outcome: "passed", artifactRef: observation.artifactRef, checks: task.acceptanceCriteria.filter(check => observation.observedChecks.includes(check)) };
       if (!evaluateTaskGate(run.plan, [...run.evidence, evidence], run.replId, task.id, this.now()).allowed) return { state: "pending" };
       return { state: "passed", evidence };
     } catch { return { state: "pending" }; }

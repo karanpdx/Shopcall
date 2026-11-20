@@ -19,7 +19,8 @@ export function ReviewPanel({ kind, proposal, contactEmail, busy, error, onConfi
   const [contactOk, setContactOk] = useState(false);
   const expired = new Date(proposal.expiresAt).getTime() < Date.now();
   const publish = kind === "publish";
-  const canConfirm = !busy && !expired && (!publish || (photosOk && contactOk));
+  const publicInformation = publish || proposal.publishesInformation === true;
+  const canConfirm = !busy && !expired && (!publicInformation || (photosOk && (!contactEmail || contactOk)));
 
   useEffect(() => {
     const d = ref.current;
@@ -38,11 +39,11 @@ export function ReviewPanel({ kind, proposal, contactEmail, busy, error, onConfi
           ))}
         </tbody>
       </table>
-      {publish && (
+      {publicInformation && (
         <fieldset className="acks">
           <legend>This makes the following public</legend>
           <label className="check"><input type="checkbox" checked={photosOk} onChange={e => setPhotosOk(e.target.checked)} /> The product photos, names, prices and stock above</label>
-          <label className="check"><input type="checkbox" checked={contactOk} onChange={e => setContactOk(e.target.checked)} /> My contact email{contactEmail ? `: ${contactEmail}` : ""}</label>
+          {contactEmail && <label className="check"><input type="checkbox" checked={contactOk} onChange={e => setContactOk(e.target.checked)} /> My contact email: {contactEmail}</label>}
         </fieldset>
       )}
       {expired && <p className="error" role="alert">This summary expired. Ask your assistant to prepare it again.</p>}

@@ -11,20 +11,20 @@ Import from `src/integrations/orchestrator`:
 - `buildTaskPrompt(plan, taskId)` provides follow-up role-specific instructions. The controller uses actual discovered Replit update tools on the **same app ID**. Passing `deploy` throws; publication is controller-owned.
 - `assertPlanIntegrity(plan)` detects changed snapshot/task graph before provider operations.
 - `evaluateTaskGate(plan, evidence, replId, taskId)` validates the completed dependency prefix before dispatching the next specialist task.
-- `evaluateDeploymentGate(plan, evidence, replId)` requires current, same-plan/app, independently observed acceptance evidence before publication.
-- `evaluatePublishedGate(...)` additionally requires actual provider-published status and anonymous public page/catalog verification after publication.
+- `evaluateDeploymentGate(plan, evidence, replId)` requires current, same-plan/app **static source-artifact preflight** for the first three tasks before provider publication. It never claims real browser behavior from source artifacts.
+- `evaluatePublishedGate(...)` requires actual provider-published status, full postpublication QA and final independent anonymous public page/catalog verification before ready/email/public URL exposure.
 
 Parent publication runtime owns durable job/task state, provider calls, retries, application IDs and verification callbacks. These planning/evidence functions make no provider calls and mutate no merchant data.
 
 ## Specialist sequence
 
-1. `design`: approved-style **request association**, responsive storefront and contact-to-buy design. The `approved-style-reference` criterion proves actual rendered preview carries the immutable approved plan ID; it is not an aesthetic judgment. Optional visual review can assess quality separately without becoming an invented provider prerequisite.
-2. `frontend`: functional responsive accessible presentation, empty/error states.
-3. `catalogIntegration`: live canonical API fetch, exact business ID/current revision, original images and no private data, uncached per-request server rendering and same-origin live catalog proxy.
-4. `qa`: actual anonymous preview/browser and live network observations, product values/images and no checkout.
-5. `deploy`: external controller invokes actual publication only after all prior gates, then verifies public output.
+1. `design`: static `approved-style-reference`, `design-artifacts`, `contact-integration-artifacts`. Actual source must reference the immutable approved request/design and contain storefront/contact design artifacts. This is request association and source preflight, not aesthetic or rendered acceptance.
+2. `frontend`: static `frontend-artifacts`, `accessible-control-artifacts`, `failure-state-artifacts`. Inspect actual source, not a completion message. Source presence does not prove runtime accessibility/responsiveness/error behavior.
+3. `catalogIntegration`: static `catalog-fetch-artifacts`, `canonical-endpoint-reference`, `catalog-proxy-artifacts`, `no-catalog-write-artifacts`. Inspect actual canonical fetch/proxy/authority boundaries before deployment.
+4. `deploy`: external controller invokes supported provider publication after static preflight. Provider-published output becomes a candidate URL; it is not yet reported ready or emailed.
+5. `qa`: actual public browser/network verification after provider publication. Required criteria include anonymous page, live catalog/current products, contact-to-buy/no checkout, desktop/mobile rendering, named controls, real failure scenarios and approved-plan association. Final independent public proof must also pass before ready/email.
 
-Design/frontend/catalog/QA can be specialized agent roles executing in sequence within one Replit app. Tool acceptance or model prose saying “done” never establishes completion. No parallel native agents are claimed. Backend authority remains outside generated storefront: no competing product database, inventory edits, owner auth or payment checkout is generated.
+Design/frontend/catalog/QA are specialized task roles around one Replit app. Supported read-only artifact list/read tools may establish **static preflight only**; a paused build status establishes idle/readiness to inspect, not source correctness or browser success. Tool acceptance or model prose saying “done” never establishes acceptance. No parallel native agents are claimed. Native preview may be protected by Replit's authentication shield; this runtime does not bypass it or invoke internal widget-only tools. True rendered QA uses provider-published public output. Backend authority remains outside generated storefront: no competing product database, inventory edits, owner auth or payment checkout is generated.
 
 ## Independently observable storefront contract
 
@@ -32,7 +32,15 @@ Every page request must server-render the current catalog using an uncached exte
 
 Visible root also carries `data-shopcall-plan="<plan ID>"`, associating the actual preview with its approved request. This marker is not a style-quality score and is compared alongside real content rather than accepted as success by itself.
 
-Generated app also exposes public read-only `GET /api/shopcall/catalog`, a same-origin no-store proxy that fetches the exact canonical public URL anew on every request and returns PublicCatalog unchanged. This proxy is not a second catalog authority and never accepts writes. Upstream failures produce honest errors rather than fake/stale catalogs.
+Generated app also exposes public read-only `GET /api/shopcall/catalog`, a same-origin no-store proxy that fetches the exact canonical public URL anew on every request and returns the normalized PublicCatalog presentation projection below. This proxy is not a second catalog authority and never accepts writes. Upstream failures produce honest errors rather than fake/stale catalogs.
+
+### B canonical wire adapter
+
+`parseCanonicalCatalog(raw, plan): NormalizedPublicCatalog` accepts B's real `{ok:true,data}` response from `/api/public/<slug>/catalog` and the classic plain normalized contract used by earlier C tests. B fields are `business.slug`, `catalogRevision`, product `name`, `priceCents`, `inventoryCount`, derived `soldOut`, metadata, and `generatedAt`; they are not the original scaffold field names. `getExpectedPublicSlug(plan)` infers the exact approved slug from the trusted approved endpoint path. B returned slug must match it before the adapter binds internal approved `businessId` into the normalized presentation marker. Identity is proved by approved trusted endpoint + matching public slug; B does not publicly return that UUID.
+
+Normalized shape is `{business:{id,name,description,contactEmail,currencyCode},revision,products:[{id,title,description,priceMinor,currencyCode,quantityOnHand,inventoryTracked,imageUrl}]}`. Nullable descriptions become empty strings. B inventory is always tracked and USD; cent amounts remain integers. A null contact email blocks readiness rather than inventing an address. Sold-out contradictions, duplicate IDs, wrong slug/UUID, stale catalog revisions, API errors and private/unknown schema fields are rejected.
+
+`generatedAt`, product `revision`/`updatedAt`, category/featured flags and hero/style metadata do not belong to this presentation projection. They are excluded from semantic comparisons so generation timestamps cannot cause false stale-catalog failures. Products sort by stable ID; actual prices, quantities, product images, names, descriptions, business details and catalog revision remain authoritative and must match. Generated SSR and same-origin proxy use this same documented mapping on every fetch; they never hardcode inventory or persist an alternative catalog.
 
 Parent verifier must independently fetch the external canonical catalog, page HTML, same-origin proxy and image assets, then compare identity/revision/product IDs/values. HTML markers are comparison handles, not proof supplied by the generated app. HTTP smoke checks do not replace browser evidence for responsive/accessibility/interaction QA or the final live camera-off update rehearsal.
 
@@ -40,11 +48,11 @@ Read-only controlled failure previews at `?shopcall_verify=empty` and `?shopcall
 
 ## Concrete automatic task observer
 
-`ConfiguredPreviewLocator` maps actual Replit app IDs to trusted preview URLs obtained from real structured provider/configuration data. No app editor URL or model-prose URL is automatically accepted. `PlaywrightPreviewInspector` uses the parent anonymous network verifier plus an actual isolated Chrome session to inspect normal desktop/mobile preview, visible exact business/product set/name markers, current catalog revision, immutable plan reference, no horizontal overflow, named visible controls, contact-to-buy, no checkout, no-store responses and both controlled failure previews. It denies all WebSockets and restricts browser HTTP origins to deployment configuration.
+`ConfiguredPreviewLocator` remains a trusted URL lookup utility; it does not authorize protected preview access. The automatic browser observer uses only `run.candidateUrl` after actual provider publication during `verifying`, never a native preview fallback. `PlaywrightPreviewInspector` uses the parent anonymous network verifier plus an actual isolated Chrome session to inspect normal desktop/mobile public output, visible exact business/product set/name markers, current catalog revision, immutable plan reference, no horizontal overflow, named visible controls, contact-to-buy, no checkout, no-store responses and both controlled failure previews. It denies all WebSockets, closes popups and restricts browser HTTP origins to deployment configuration.
 
-`AutomaticStorefrontTaskObserver` converts only those observed check identifiers into task evidence and runs `evaluateTaskGate` before allowing progression. It does not mint arbitrary checks from tool acceptance, mock results, or Agent prose. Missing preview configuration is explicitly blocked; temporary network/browser/content mismatch stays pending for the workflow's bounded timeout. Browser tests are scoped smoke checks, not a claim of complete WCAG compliance or aesthetic quality.
+`AutomaticStorefrontTaskObserver` accepts only task `qa` in phase `verifying`. It converts observed public browser checks into task-scoped evidence and requires actual provider-published plus earlier static-artifact evidence through `evaluateTaskGate`. It does not mint arbitrary browser checks from tool acceptance, mock results, or Agent prose. Missing candidate output or temporary network/browser/content mismatch stays pending for the workflow's bounded timeout. Browser tests are scoped smoke checks, not a claim of complete WCAG compliance or aesthetic quality.
 
-Wire `new AutomaticStorefrontTaskObserver(locator, new PlaywrightPreviewInspector(trustedOrigins, anonymousVerifier))` into `ReplitPublicationAdapter`. The actual Chrome binary and preview URL still need real deployment configuration. This module adds no model provider or API key requirement.
+Compose Replit's concrete supported artifact observer for the first three tasks with `new AutomaticStorefrontTaskObserver(locator, new PlaywrightPreviewInspector(trustedOrigins, anonymousVerifier))` for postpublication `qa` in `ReplitPublicationAdapter`. The actual Chrome binary and trusted provider-published origin need real deployment configuration. This module adds no model provider or API key requirement.
 
 ## Approval and untrusted input
 
@@ -54,8 +62,8 @@ Caller must load brief from an actual owner-approved immutable publication snaps
 
 `TaskEvidence` includes exact plan/task/app IDs, source, observedAt, passed/failed outcome, redacted artifact reference and acceptance check identifiers. Sources are artifact review, browser check, network check, real provider build/publish metadata or independent reviewer. Unknown sources, including model “done” messages, are rejected. Runtime must obtain evidence through trusted backend verifier callbacks; never accept arbitrary public request bodies as trusted evidence.
 
-Every prepublish task needs complete acceptance coverage, appropriate source, current exact plan/app, successful dependencies with earlier evidence and observations within one hour. Latest failed result blocks publication. Provider build-status alone proves only checks actually observed by the verifier, not accessibility or live data correctness. Postpublish provider metadata and anonymous browser proof are separate observations.
+Every prepublish task needs complete **static artifact** coverage, artifact-review/independent-review provenance, current exact plan/app, successful earlier dependencies and observations within one hour. Latest failed result blocks publication. Real provider build-status alone does not prove source correctness, accessibility or live data. QA must follow actual provider-published status, and final public proof must follow QA. A public candidate may exist during verification; application never exposes it as verified-ready or emails success until all checks pass.
 
-This module validates evidence structure, coverage and scope; it does not perform browser inspection itself. A missing verifier is a hard runtime blocker, not permission to convert Replit model prose into evidence. Final same-URL camera-off update rehearsal remains an additional end-to-end acceptance gate after publication.
+Pure evidence helpers validate structure, coverage and scope; the concrete inspector actually performs public network/browser observations. A missing supported artifact reader or public browser verifier is a real blocker, not permission to convert Replit model prose into runtime success. Final same-URL camera-off update rehearsal remains an additional end-to-end acceptance gate after publication.
 
 Run its local tests with `node --import tsx --test tests/integrations/orchestrator*.test.ts`. Mocked inspector tests establish gate behavior only; they are not evidence that a real preview browser check passed.
