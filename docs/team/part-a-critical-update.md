@@ -22,3 +22,20 @@ MVP uses **ordered specialist tasks in one Replit app**, explicitly accepted by 
 Shared v0 types remain under `src/contracts`. C's additional runtime types will live under `src/integrations/orchestrator` and `src/integrations/publication`; B should map backend run state to owner-safe status DTOs. These are under implementation on `feat/integrations`; use the final handoff before wiring exact function names.
 
 Codex will not edit A's UI files or B's route files in this lane. Coordinate contract changes through B.
+
+## Call experience: thorough without trapping the caller
+
+User specifically wants useful information without excessive questions or keeping the merchant on a long call. A owns the interaction and visible escape paths; C owns the conversational prompt/tools. Implement these together:
+
+- Keep **Finish & review** and **End call** visible throughout. Ending preserves drafts; it never silently publishes. Finishing opens a compact review even if some drafts are incomplete. The owner can complete required fields there or resume later.
+- Use one broad opening. Harvest all volunteered business/style/product facts. Never ask a question whose answer is already in canonical state or the current draft.
+- For an item, invite the merchant to show it and give name, price and available count naturally together. Ask follow-ups only for missing required fields or genuine identity/quantity ambiguity. Reuse established store currency; show it in final review rather than reasking for every item.
+- Required for an approved listing: identity/title, exact price/currency, explicit stock quantity or intentionally untracked stock, chosen original photo. Required for publication: business identity, approved public contact and a combined owner approval. Missing values remain visibly incomplete; no default stock of one or inferred prices.
+- Story, audience, detailed branding, shipping preferences, variants, pricing advice and image enhancement are optional. Do not march through a questionnaire. Use already volunteered preferences; offer optional enrichment after the starter store is ready or when the owner asks.
+- Show progress through actual complete/incomplete product cards. A card should allow correction by touch/typing; the caller should not need several spoken turns to fix a photo label.
+- Perform one combined final readback/review. Avoid per-field confirmations followed by the same full confirmation again. Backend click approval stays authoritative. A price/stock ambiguity is clarified before this review, not guessed away.
+- Returning multi-product updates get one concise before/after summary and one combined apply confirmation. Camera starts off; audio continues if camera is toggled.
+- Once inputs are saved/approved, release the caller to a persistent status screen. Do not keep audio open while Replit builds. Say email will be sent only if notification configuration actually exists, and never claim sent/live before backend evidence.
+- A roughly two-minute intake is a demo design target, not a hard cutoff or measured claim. Offer a minimal first version and a visible exit; don't interrupt volunteered useful information to enforce a timer.
+
+Call-policy helper and example scripts are being developed separately within C. Integrate the final `call-policy-handoff.md` when available; do not independently fork the agent's prompt into frontend code.
