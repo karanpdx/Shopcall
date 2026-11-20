@@ -27,3 +27,11 @@ export function mediaStageLabel(stage: MediaStage, kind: "analysis" | "enhanceme
   return "Newer draft available";
 }
 export const ownerMediaAssetUrl = (assetId: string) => `/api/assets/${encodeURIComponent(assetId)}`;
+
+/** Keep owner-stated names; visual text only fills a blank title and offers description. */
+export function suggestedTextChoice(job: MediaJobView, draft: { title: string }) {
+  return {
+    applyTitle: !!job.suggestedTitle && !job.titleApplied && !draft.title.trim(),
+    applyDescription: !!job.suggestedDescription && !job.descriptionApplied,
+  };
+}

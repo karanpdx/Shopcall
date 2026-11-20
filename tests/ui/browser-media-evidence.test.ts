@@ -12,7 +12,7 @@ test("owner sees generated suggestions/photos before explicitly applying; origin
   const draftId = "55555555-5555-4555-8555-555555555555";
   const original = "77777777-7777-4777-8777-777777777777";
   const enhanced = "88888888-8888-4888-8888-888888888888";
-  const draft = { id: draftId, callId, fields: { title: "Mug", description: "Owner description", priceMinor: 2400, quantityOnHand: 4, currencyCode: "USD", inventoryTracked: true }, imageAssetId: original, imageUrl: `/api/assets/${original}`, revision: 2, proposalId: null, ready: true };
+  const draft = { id: draftId, callId, fields: { title: "Mug", description: "Owner description", priceMinor: 2400, quantityOnHand: 4, currencyCode: "USD", inventoryTracked: true }, imageAssetId: original, imageUrl: `/api/assets/${original}`, revision: 5, proposalId: null, ready: true };
   const job: MediaJobView = { id: "media-job", productDraftId: draftId, originalAssetId: original, originalUrl: `/api/assets/${original}`, enhancedAssetId: enhanced, enhancedUrl: `/api/assets/${enhanced}`, sourceDraftRevision: 2, currentDraftRevision: 2, analysisStatus: "ready", enhancementStatus: "ready", selectedVariant: "original", suggestedTitle: "Blue glazed mug", suggestedDescription: "Blue glaze and a curved handle.", titleApplied: false, descriptionApplied: false, errorCode: null, evidence: { analysisModel: "fixture", enhancementModel: "fixture", analysisStartedAt: null, analysisCompletedAt: null, enhancementStartedAt: null, enhancementCompletedAt: null }, createdAt: "2026-11-20T22:00:00Z", updatedAt: "2026-11-20T22:00:00Z" };
   const choices: Record<string, unknown>[] = [];
   try {
@@ -45,6 +45,11 @@ test("owner sees generated suggestions/photos before explicitly applying; origin
     assert.equal(await page.locator("video.ft-video").isVisible(), false);
     await page.getByRole("button", { name: "Apply suggestions", exact: true }).click();
     await page.getByRole("button", { name: "Suggestions applied", exact: true }).waitFor();
+    assert.equal(draft.fields.title, "Mug", "Owner-stated name must not be overwritten by an image suggestion.");
+    assert.equal(draft.fields.description, job.suggestedDescription);
+    assert.equal(choices[0].expectedDraftRevision, 5, "Use the current draft revision even when completed media projection is older.");
+    assert.equal(choices[0].applyTitle, false);
+    assert.equal(choices[0].applyDescription, true);
     await page.getByRole("button", { name: "Use enhanced photo", exact: true }).click();
     await page.getByRole("button", { name: "Keep original", exact: true }).waitFor();
     const originalImage = page.getByRole("img", { name: /Original photo of/ });

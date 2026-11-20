@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mediaJobMatchesDraft, mediaJobIsRunning, mediaStageLabel, type MediaJobView } from "../../src/features/call/media";
+import { mediaJobMatchesDraft, mediaJobIsRunning, mediaStageLabel, suggestedTextChoice, type MediaJobView } from "../../src/features/call/media";
 import { createApiClient } from "../../src/features/call/api";
 const draftA = "55555555-5555-4555-8555-555555555555";
 const draftB = "66666666-6666-4666-8666-666666666666";
@@ -29,6 +29,12 @@ test("polling and copy reflect actual running/failed stages without fabricated c
   assert.equal(mediaStageLabel("running", "analysis"), "Analyzing photo");
   assert.equal(mediaStageLabel("running", "enhancement"), "Enhancing photo");
   assert.equal(mediaStageLabel("failed", "enhancement"), "Enhancement failed");
+});
+
+test("suggestions preserve an owner-stated name while allowing photo description", () => {
+  assert.deepEqual(suggestedTextChoice(job(), { title: "Owner's mug name" }), { applyTitle: false, applyDescription: true });
+  assert.deepEqual(suggestedTextChoice(job(), { title: "" }), { applyTitle: true, applyDescription: true });
+  assert.deepEqual(suggestedTextChoice({ ...job(), descriptionApplied: true }, { title: "Owner's mug name" }), { applyTitle: false, applyDescription: false });
 });
 
 test("media API uses stable call/draft identity and explicit owner flags without price or stock changes", async () => {

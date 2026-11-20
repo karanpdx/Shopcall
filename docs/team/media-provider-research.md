@@ -6,6 +6,8 @@ Read AI Gateway skill and setup/spend references. Complete current model catalog
 
 One authorized bounded **synthetic** one-pixel vision request succeeded: `google/gemini-2.5-flash-lite`, HTTP 200, response “Pure white, single pixel.” Usage 279 input / 6 output tokens; Gateway reported `$0.0000303`. No merchant data, image editing, key creation, budget changes, or credit purchase occurred. Do not describe it as free based on the zero-balance endpoint.
 
+Subsequent authenticated read-only `GET /v1/models?include_availability` returned complete account eligibility and HTTP request admission `available`. It explicitly marked Gemini image models (`google/gemini-2.5-flash-image`, `google/gemini-3.1-flash-image`, `google/gemini-3.1-flash-lite-image`) and `openai/gpt-image-2` **ineligible**, category `policy`, reason `plan_restricted`. This explains the parent's Google-image HTTP 403 `no_providers_available`; it is not evidence of a generic provider outage. `openai/gpt-image-1-mini` and `bfl/flux-kontext-pro` were **eligible**. Eligibility reflects stored account configuration, not live generation success. No image edit was made by this research agent; parent controls any bounded alternate-model test.
+
 ## Vision contract
 
 `POST https://ai-gateway.vercel.sh/v1/chat/completions`, bearer credential from `AI_GATEWAY_API_KEY || VERCEL_OIDC_TOKEN`, server-side only:

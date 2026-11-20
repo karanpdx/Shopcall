@@ -21,6 +21,13 @@ export type WorkflowTask = { id: string; role: string };
 export type BackendBuildStatus = BackendBuildJob & { workflow?: { job: BuildJob | null; task: WorkflowTask | null; blocked: boolean; requiresReconciliation: boolean } };
 export type UiBuildStatus = BuildJob & { backendStatus: Pick<BackendBuildJob, "buildStatus" | "publicationStatus">; requiresAttention: boolean; task: WorkflowTask | null };
 
+export function buildStageLabel(task: WorkflowTask | null) {
+  if (task?.id === "design") return "Designing your storefront";
+  if (task?.id === "frontend") return "Building storefront pages";
+  if (task?.id === "catalogIntegration") return "Connecting your products";
+  return null;
+}
+
 const ownerAssetUrl = (assetId: string) => `/api/assets/${encodeURIComponent(assetId)}`;
 
 export function flattenWorkingDraft(draft: WorkspaceDraft): SavedDraft {
@@ -45,7 +52,9 @@ export function normalizeBuildJob(job: BackendBuildStatus): UiBuildStatus {
   const failed = job.buildStatus === "failed" || job.publicationStatus === "failed";
   const requiresAttention = job.workflow?.blocked === true || job.workflow?.requiresReconciliation === true;
   const phase = failed || requiresAttention ? "failed" : job.buildStatus === "queued" ? "queued" : job.buildStatus === "running" ? "building" : job.publicationStatus === "completed" && job.publicUrl ? "ready" : "verifying";
-  return { id: job.id, businessId: job.businessId, phase, replId: job.providerJobId, publicUrl: phase === "ready" ? job.publicUrl : null, error: job.errorMessage ?? (requiresAttention ? job.workflow?.job?.error ?? "Build needs attention before it can continue. Your saved catalog remains available." : null), createdAt: job.createdAt, updatedAt: job.updatedAt,
+  const error = job.errorMessage ?? (requiresAttention ? job.workflow?.job?.error ?? "Build needs attention before it can continue. Your saved catalog remains available." : null);
+  const humanError = error && /SOURCE_PREFLIGHT_(?:UNVERIFIED|INCOMPLETE)/.test(error) ? "The generated app needs another verification check. Your saved products are safe." : error;
+  return { id: job.id, businessId: job.businessId, phase, replId: job.providerJobId, publicUrl: phase === "ready" ? job.publicUrl : null, error: humanError, createdAt: job.createdAt, updatedAt: job.updatedAt,
     backendStatus: { buildStatus: job.buildStatus, publicationStatus: job.publicationStatus }, requiresAttention, task: job.workflow?.task ?? null };
 }
 

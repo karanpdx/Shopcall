@@ -58,6 +58,9 @@ test("job display never exposes candidate URL before both build and publication 
   assert.equal(blocked.publicUrl, null);
   assert.deepEqual(blocked.backendStatus, { buildStatus: "running", publicationStatus: "pending" });
   assert.deepEqual(blocked.task, { id: "design", role: "Storefront UI designer" });
+  const waiting = normalizeBuildJob({ ...job, buildStatus: "running", errorMessage: "SOURCE_PREFLIGHT_UNVERIFIED", workflow: { job: null, task: null, blocked: true, requiresReconciliation: true } });
+  assert.equal(waiting.error, "The generated app needs another verification check. Your saved products are safe.");
+  assert.equal(waiting.requiresAttention, true);
 });
 
 test("private draft thumbnails remain on owner origin even when public backend uses a tunnel", () => {

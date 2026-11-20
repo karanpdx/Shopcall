@@ -24,6 +24,7 @@ export type DraftView = Required<Pick<DraftPatch, "title" | "description" | "cur
   imageAssetId?: string | null;
   proposalId?: string | null;
   approved?: boolean;
+  revision?: number;
 };
 
 export type DraftsState = { order: string[]; byId: Record<string, DraftView>; activeId: string | null };

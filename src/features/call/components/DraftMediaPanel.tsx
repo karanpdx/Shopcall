@@ -2,7 +2,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createApiClient } from "../api";
 import type { DraftView } from "../drafts";
-import { mediaJobIsRunning, mediaJobMatchesDraft, mediaStageLabel, ownerMediaAssetUrl, type MediaChoice, type MediaJobView } from "../media";
+import { mediaJobIsRunning, mediaJobMatchesDraft, mediaStageLabel, ownerMediaAssetUrl, suggestedTextChoice, type MediaChoice, type MediaJobView } from "../media";
 
 /** Runs only inside Products. Backend work continues independently when this panel closes. */
 export function DraftMediaPanel({ callId, draft, onChanged }: { callId: string; draft: DraftView; onChanged: () => Promise<void> }) {
@@ -36,7 +36,7 @@ export function DraftMediaPanel({ callId, draft, onChanged }: { callId: string; 
     if (!job || busy || !mediaJobMatchesDraft(job, latest.current)) return;
     setBusy(true); setError(null);
     const id = job.id;
-    const result = await api.chooseDraftMedia(callId, draft.id, { jobId: id, expectedDraftRevision: job.currentDraftRevision, ...choice });
+    const result = await api.chooseDraftMedia(callId, draft.id, { jobId: id, expectedDraftRevision: latest.current.revision ?? job.currentDraftRevision, ...choice });
     if (!result.ok) {
       setBusy(false); setError(result.error.message);
       const current = await api.getDraftMedia(callId, draft.id);
@@ -52,7 +52,8 @@ export function DraftMediaPanel({ callId, draft, onChanged }: { callId: string; 
   if (!draft.imageAssetId) return null;
   const stale = job && [job.analysisStatus, job.enhancementStatus].includes("stale");
   const suggestionsAvailable = !!job && job.analysisStatus === "ready" && !!(job.suggestedTitle || job.suggestedDescription);
-  const suggestionsApplied = !!job && (!job.suggestedTitle || job.titleApplied) && (!job.suggestedDescription || job.descriptionApplied);
+  const textChoice = job ? suggestedTextChoice(job, draft) : null;
+  const suggestionsApplied = !!textChoice && !textChoice.applyTitle && !textChoice.applyDescription;
   const enhancementReady = !!job && job.enhancementStatus === "ready" && !!job.enhancedAssetId;
   return <section aria-label={`Photo processing for ${draft.title || "this product"}`}>
     <p className="muted" role="status">Photo saved. Original retained.</p>
@@ -60,7 +61,7 @@ export function DraftMediaPanel({ callId, draft, onChanged }: { callId: string; 
     {error && <p className="error" role="status">{error}</p>}
     {job && [job.analysisStatus, job.enhancementStatus].some(status => status === "failed" || status === "interrupted") && <p className="muted">Processing could not finish completely. Your original photo is available; you can keep going.</p>}
     {stale && <p className="muted">This photo job belongs to an earlier draft. Keep the current original and review the latest details.</p>}
-    {suggestionsAvailable && <div><h3>Suggested listing</h3>{job.suggestedTitle && <p><strong>{job.suggestedTitle}</strong></p>}{job.suggestedDescription && <p>{job.suggestedDescription}</p>}<button type="button" className="btn ghost" disabled={busy || draft.approved || !!stale || suggestionsApplied} onClick={() => choose({ applyTitle: !!job.suggestedTitle && !job.titleApplied, applyDescription: !!job.suggestedDescription && !job.descriptionApplied })}>{suggestionsApplied ? "Suggestions applied" : "Apply suggestions"}</button><p className="muted">Suggestions describe the photo only. Your price and stock stay as you supplied them.</p></div>}
+    {suggestionsAvailable && <div><h3>Suggested listing</h3>{job.suggestedTitle && <p><strong>{job.suggestedTitle}</strong></p>}{job.suggestedDescription && <p>{job.suggestedDescription}</p>}<button type="button" className="btn ghost" disabled={busy || draft.approved || !!stale || suggestionsApplied} onClick={() => choose(suggestedTextChoice(job, latest.current))}>{suggestionsApplied ? job.titleApplied || job.descriptionApplied ? "Suggestions applied" : "Keeping your current name" : "Apply suggestions"}</button><p className="muted">{draft.title.trim() ? "Your current name will be kept. " : ""}Suggestions describe the photo only. Your price and stock stay as you supplied them.</p></div>}
     {job && <div style={{ display: "grid", gridTemplateColumns: enhancementReady ? "repeat(2, minmax(0, 1fr))" : "minmax(0, 1fr)", gap: 12 }}>
       <figure style={{ margin: 0 }}><img src={ownerMediaAssetUrl(job.originalAssetId)} alt={`Original photo of ${draft.title || "product"}`} style={{ width: "100%", height: 150, objectFit: "contain" }} /><figcaption>Original{job.selectedVariant === "original" ? " · selected" : " · retained"}</figcaption></figure>
       {enhancementReady && <figure style={{ margin: 0 }}><img src={ownerMediaAssetUrl(job.enhancedAssetId!)} alt={`Enhanced photo of ${draft.title || "product"}`} style={{ width: "100%", height: 150, objectFit: "contain" }} /><figcaption>Enhanced{job.selectedVariant === "enhanced" ? " · selected" : " · preview"}</figcaption></figure>}

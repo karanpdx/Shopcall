@@ -1,4 +1,4 @@
-# Shopcall
+# lit
 
 Show your products. Tell your story. Get a Replit-generated storefront you can update with another call.
 
@@ -6,7 +6,7 @@ Show your products. Tell your story. Get a Replit-generated storefront you can u
 
 A/B/C are integrated on `feat/integrations`. Browser calling, authenticated persistent catalog, draft-bound still capture, combined owner review and the durable Replit publication worker are implemented. The simpler phone frontend is deployed at **https://shopcall-demo.vercel.app**. The API/storage/worker still run on the demo Mac behind temporary HTTPS tunnels; keep the Mac and processes running. See [demo topology](docs/team/local-public-demo.md).
 
-Provider evidence (November 20, 2026): a short real ElevenLabs session through the deployed frontend returned greeting audio with a synthetic microphone. A real, explicitly synthetic Replit probe was automatically created and published, then independently verified in an anonymous mobile browser and through its fresh server endpoint. Neither establishes a complete real merchant demo. Physical-phone audio, three real product photos, merchant publication and same-URL voice updates still need end-to-end acceptance. Photo analysis/enhancement is being integrated; saved photos alone are not evidence of generation. Real email is not configured.
+Provider evidence (November 20, 2026): a short real ElevenLabs session through the deployed frontend returned greeting audio with a synthetic microphone. A real, explicitly synthetic Replit probe was automatically created and published, then independently verified in an anonymous mobile browser and through its fresh server endpoint. The deployed API also passed synthetic upload → durable queue → real vision/description → real image edit → explicit owner selection → authenticated image preview, without changing the canonical catalog. Neither synthetic check establishes a complete merchant demo. Physical-phone audio, three real product photos, merchant publication and same-URL voice updates still need end-to-end acceptance. Real email is not configured.
 Confirmed scope: working hackathon demo, one authenticated demo merchant, **fully automatic Replit app creation and publication**, and subsequent camera-off price/stock updates at the **same public URL**. No template fallback. See [decisions](docs/decisions.md) and [requirements](docs/requirements.md).
 
 ## Local setup
@@ -45,7 +45,7 @@ npm run build
 
 Run `npm run demo:setup` to fill missing local defaults and write generated credentials to private ignored `.shopcall/demo-login.txt`. Run `npm run replit:connect` for application-owned OAuth, then `npm run replit:check` to discover actual tools. Configure public HTTPS catalog origin, persistent storage, observed Replit response profile and Chrome before starting `npm run worker -- --loop`.
 
-Phone: open the frontend directly in Safari (iPhone) or Chrome (Android), sign in, tap **Start call**, allow microphone access and turn on camera when showing a product. Give name, USD price and quantity together. **Products** shows saved drafts. **Finish & review** ends audio and prepares the final listing review. Only explicit owner confirmation applies catalog changes and queues publication. Wait for real observed status; do not submit duplicate builds.
+Phone: open the frontend directly in Safari (iPhone) or Chrome (Android), sign in, tap **Start call**, allow microphone access and turn on camera when showing a product. Give name, USD price and quantity together. Capture runs directly when the enabled camera is ready. **Products** shows saved drafts and processing states. **Finish & review** ends audio and opens original/generated photo previews and suggested descriptions. Choose before preparing one final review. Only explicit owner confirmation applies catalog changes and queues publication. Wait for real observed status; do not submit duplicate builds. [Media API and safeguards](docs/team/product-media-handoff.md).
 
 Additional opt-in checks:
 
