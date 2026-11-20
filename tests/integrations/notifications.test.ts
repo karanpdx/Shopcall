@@ -133,6 +133,16 @@ test("cancels when URL changed between enqueue and send", async () => {
   assert.equal(outbox.all()[0].status, "cancelled");
 });
 
+test("owner email changes cancel stored recipient rather than sending stale owner address", async () => {
+  let pub: unknown = verified();
+  const { outbox, deps, http } = setup(() => pub, []);
+  await enqueuePublicationReadyEmail(deps, { jobId: JOB });
+  pub = verified({ ownerEmail: "new-owner@example.com" });
+  assert.equal((await processNotificationOutbox(deps)).cancelled, 1);
+  assert.equal(http.calls.length, 0);
+  assert.equal(outbox.all()[0].status, "cancelled");
+});
+
 // ---------- escaping / URL ----------
 
 test("escapes merchant content and validates URLs", () => {
@@ -307,7 +317,7 @@ test("stops retrying past the provider idempotency window", async () => {
 
 test("publication source outage does not send and retries later", async () => {
   let down = true;
-  const { outbox, deps, http } = setup(() => { if (down) throw new Error("db down"); return verified(); }, []);
+  const { outbox, deps, http } = setup(() => { if (down) throw new Error("db down secret=NEVER_STORE"); return verified(); }, []);
   // Enqueue while source is up.
   down = false;
   await enqueuePublicationReadyEmail(deps, { jobId: JOB });
@@ -315,6 +325,17 @@ test("publication source outage does not send and retries later", async () => {
   await processNotificationOutbox(deps);
   assert.equal(http.calls.length, 0);
   assert.equal(outbox.all()[0].status, "pending");
+  assert.equal(outbox.all()[0].lastError?.includes("NEVER_STORE"), false);
+});
+
+test("crashed final send lease cannot bypass maximum attempt budget", async () => {
+  const { outbox, deps, http, clock } = setup(() => verified(), []);
+  await enqueuePublicationReadyEmail({ ...deps, retry: { maxAttempts: 1 } }, { jobId: JOB });
+  await outbox.claimDue(clock.now(), 1, 1000);
+  clock.advance(1001);
+  assert.equal((await processNotificationOutbox(deps)).sendFailed, 1);
+  assert.equal(http.calls.length, 0);
+  assert.equal(outbox.all()[0].status, "send_failed");
 });
 
 test("concurrent workers do not double-send a leased record", async () => {

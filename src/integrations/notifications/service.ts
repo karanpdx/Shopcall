@@ -61,7 +61,7 @@ async function loadVerified(publications: VerifiedPublicationSource, jobId: stri
   const raw = await publications.getPublication(jobId);
   if (raw === null || raw === undefined) return fail("NOT_FOUND", "Publication job not found");
   const phase = (raw as { phase?: unknown }).phase;
-  if (phase !== "ready") return fail("NOT_VERIFIED", `Publication is not verified (phase=${String(phase)})`);
+  if (phase !== "ready") return fail("NOT_VERIFIED", "Publication is not verified");
   const parsed = verifiedPublicationSchema.safeParse(raw);
   if (!parsed.success) return fail("NOT_VERIFIED", "Publication lacks complete anonymous verification evidence");
   const pub = parsed.data;
@@ -156,15 +156,22 @@ export async function processNotificationOutbox(
       return finish({ status: "pending", lastError: error, nextAttemptAt: new Date(clock().getTime() + delay).toISOString() }, "retrying");
     };
 
+    // A process may have died during the final permitted send. Reclaiming its lease
+    // must not create an extra provider attempt after the configured attempt budget.
+    if (rec.attempts > rec.maxAttempts) {
+      await finish({ status: "send_failed", lastError: "send attempt budget exhausted; prior outcome may require provider reconciliation" }, "sendFailed");
+      continue;
+    }
+
     // 1. Publication must still be verified for the same URL and revision.
     let check: CheckResult;
     try {
       check = await loadVerified(deps.publications, rec.jobId);
-    } catch (err) {
-      await retryOrFail(`publication source error: ${err instanceof Error ? err.message : String(err)}`, null);
+    } catch {
+      await retryOrFail("publication source temporarily unavailable", null);
       continue;
     }
-    if (!check.ok || check.url !== rec.publicUrl || check.publication.catalogRevision !== rec.catalogRevision) {
+    if (!check.ok || check.url !== rec.publicUrl || check.publication.catalogRevision !== rec.catalogRevision || check.publication.businessId !== rec.businessId || rec.payload.to.length !== 1 || rec.payload.to[0] !== check.publication.ownerEmail) {
       const reason = check.ok ? "publication URL or revision changed since enqueue" : check.error.message;
       await finish({ status: "cancelled", lastError: reason }, "cancelled");
       continue;

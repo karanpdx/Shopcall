@@ -3,6 +3,7 @@ export { getNotificationHealth, loadNotificationConfig, type NotificationConfig 
 export { createResendClient, type ResendClient, type ResendClientOptions, type SendOutcome, type EmailEventOutcome } from "./resend";
 export { escapeHtml, renderPublicationReadyEmail, validatePublicUrl } from "./template";
 export { createInMemoryNotificationOutbox } from "./outbox-memory";
+export { SqliteNotificationOutbox } from "./outbox-sqlite";
 export {
   DEFAULT_RETRY_POLICY,
   enqueuePublicationReadyEmail,
