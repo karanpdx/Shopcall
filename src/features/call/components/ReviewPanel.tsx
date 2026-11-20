@@ -39,6 +39,8 @@ export function ReviewPanel({ kind, proposal, contactEmail, busy, error, onConfi
           ))}
         </tbody>
       </table>
+      {!!proposal.omittedDraftCount && <p className="muted">{proposal.omittedDraftCount} incomplete product draft{proposal.omittedDraftCount === 1 ? " is" : "s are"} saved for later and will not be published.</p>}
+      {proposal.catalogApplied && proposal.batch && <p className="muted">Your reviewed listings are already saved. Retrying only starts the storefront build.</p>}
       {publicInformation && (
         <fieldset className="acks">
           <legend>This makes the following public</legend>
@@ -49,7 +51,7 @@ export function ReviewPanel({ kind, proposal, contactEmail, busy, error, onConfi
       {expired && <p className="error" role="alert">This summary expired. Ask your assistant to prepare it again.</p>}
       {error && <p className="error" role="alert">{error}</p>}
       <div className="draft-actions">
-        <button type="button" className="btn primary" disabled={!canConfirm} onClick={onConfirm}>{busy ? "Confirming…" : publish ? "Confirm and publish" : "Confirm changes"}</button>
+        <button type="button" className="btn primary" disabled={!canConfirm} onClick={onConfirm}>{busy ? "Saving and starting build…" : publish ? proposal.catalogApplied && proposal.batch ? "Retry storefront build" : "Confirm and publish" : "Confirm changes"}</button>
         <button type="button" className="btn ghost" onClick={onCancel} disabled={busy}>Not yet</button>
       </div>
     </dialog>

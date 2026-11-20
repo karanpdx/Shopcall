@@ -3,7 +3,9 @@ import { productCreateInput } from "../../contracts/api";
 import { parseClientToolArgs, type ClientToolName } from "../elevenlabs/tools";
 import { fail, HttpError } from "../../server/http";
 import { assetUrl } from "../../server/config";
-import { CallWorkspaceStore, type WorkspaceOwner, type WorkingProductDraft, type DraftFields } from "./store";
+import { createHash } from "node:crypto";
+import { z } from "zod";
+import { CallWorkspaceStore, type WorkspaceOwner, type WorkingProductDraft, type DraftFields, type CallReviewSnapshot } from "./store";
 
 export type CatalogBatchPreview = { id: string; businessId: string; callId: string; status: "pending" | "approved" | "rejected"; changes: ProductChange[]; summary: string[] | string; expiresAt: string };
 export interface WorkspaceCatalogRepository {
@@ -12,6 +14,7 @@ export interface WorkspaceCatalogRepository {
   getProduct(businessId: string, productId: string): Promise<Product | null>;
   proposeCatalogBatch(businessId: string, input: { callId: string; expectedCatalogRevision: number; idempotencyKey: string; changes: ProductChange[] }): Promise<CatalogBatchPreview>;
   getCatalogBatch(businessId: string, proposalId: string): CatalogBatchPreview | null | Promise<CatalogBatchPreview | null>;
+  rejectCatalogBatch(businessId: string, proposalId: string): Promise<CatalogBatchPreview>;
   getBuildJob(businessId: string, jobId: string): Promise<unknown | null>;
 }
 
@@ -73,6 +76,60 @@ export class CallWorkspaceService {
     }
     this.store.linkProposal(owner, callId, draftId, draft.revision, proposal.id);
     return proposal;
+  }
+
+  /** Owner UI preparation only. One exact batch; applying still requires explicit owner confirmation. */
+  async prepareCallReview(owner: WorkspaceOwner, callId: string, raw: unknown) {
+    const input = z.object({ name: z.string().trim().min(1).max(160), contactEmail: z.email(), idempotencyKey: z.string().min(1).max(160) }).strict().parse(raw);
+    const call = this.store.getCall(owner, callId); // Ended calls remain reviewable; no audio restart.
+    const requestHash = createHash("sha256").update(JSON.stringify({ name: input.name, contactEmail: input.contactEmail })).digest("hex");
+    const existing = this.store.getCombinedReview(owner, callId, input.idempotencyKey) ?? this.store.getUnlinkedCombinedReview(owner, callId);
+    if (existing) {
+      if (existing.requestHash !== requestHash) fail(409, "CONFLICT", "An earlier review has different frozen business details. Recover or reject that review before preparing another.");
+      return this.finishCombinedReview(owner, callId, existing);
+    }
+    let drafts = this.store.listDrafts(owner, callId);
+    const approvedIds = new Set<string>(); const pendingIds = new Set<string>();
+    for (const draft of drafts) {
+      if (draft.proposalId) {
+        const batch = await this.catalog.getCatalogBatch(owner.businessId, draft.proposalId);
+        if (!batch) return fail(409, "NOT_READY", "A product review could not be reconciled. Reload its existing proposal.");
+        if (batch.status === "approved") approvedIds.add(draft.id);
+        else if (batch.status === "pending") pendingIds.add(batch.id);
+      } else if (draft.proposalRevision !== null) return fail(409, "NOT_READY", "An individual product review is still being prepared. Recover its original proposal first.");
+    }
+    // Preparation replaces pending individual/older aggregate previews, never a
+    // committed product. Reject before linking new batch so old approval cannot duplicate.
+    for (const id of pendingIds) await this.catalog.rejectCatalogBatch(owner.businessId, id);
+    for (const draft of drafts) if (draft.proposalId && !approvedIds.has(draft.id)) this.store.clearRejectedProposal(owner, callId, draft.id, draft.proposalId);
+    drafts = this.store.listDrafts(owner, callId).filter(draft => !approvedIds.has(draft.id));
+    const ready = drafts.filter(draft => draftReadiness(draft).ready);
+    const incompleteDraftIds = drafts.filter(draft => !draftReadiness(draft).ready).map(draft => draft.id);
+    const business = await this.catalog.getBusiness(owner.businessId);
+    if (!business) return fail(404, "NOT_FOUND", "Business not found.");
+    if (!ready.length && !(await this.catalog.listProducts(owner.businessId)).some(product => product.isPublished)) fail(409, "NOT_READY", "No complete products are ready. Your call is ended and drafts are saved; add missing product details or a photo before publishing.");
+    const profile = { name: input.name, contactEmail: input.contactEmail, description: call.brief.description ?? business.description };
+    const changes: ProductChange[] = ready.map(draft => ({ type: "create_product", product: productCreateInput.parse({ name: draft.fields.title, description: draft.fields.description, priceCents: draft.fields.priceMinor, inventoryCount: draft.fields.quantityOnHand, imageAssetId: draft.imageAssetId }) }));
+    const patch: Record<string, string> = {};
+    if (profile.name !== business.name) patch.name = profile.name;
+    if (profile.contactEmail !== business.contactEmail) patch.contactEmail = profile.contactEmail;
+    if (profile.description !== business.description && profile.description !== null) patch.description = profile.description;
+    if (Object.keys(patch).length) changes.push({ type: "update_storefront", patch });
+    if (!changes.length) return { proposal: null, noCatalogChanges: true, business: profile, productDraftIds: [] as string[], incompleteDraftIds };
+    const snapshot = this.store.freezeCombinedReview(owner, callId, { requestKey: input.idempotencyKey, requestHash, expectedCatalogRevision: business.catalogRevision, business: profile, changes, draftRevisions: ready.map(draft => ({ id: draft.id, revision: draft.revision })), incompleteDraftIds });
+    return this.finishCombinedReview(owner, callId, snapshot);
+  }
+
+  private async finishCombinedReview(owner: WorkspaceOwner, callId: string, snapshot: CallReviewSnapshot) {
+    let proposal: CatalogBatchPreview | null;
+    if (snapshot.proposalId) proposal = await this.catalog.getCatalogBatch(owner.businessId, snapshot.proposalId);
+    else {
+      try { proposal = await this.catalog.proposeCatalogBatch(owner.businessId, { callId, expectedCatalogRevision: snapshot.expectedCatalogRevision, idempotencyKey: `call-review/${snapshot.id}`, changes: snapshot.changes }); }
+      catch (error) { if (error instanceof HttpError && error.status >= 400 && error.status < 500) this.store.releaseRejectedCombinedReview(owner, callId, snapshot); throw error; }
+      this.store.linkCombinedReview(owner, callId, snapshot, proposal.id);
+    }
+    if (!proposal) return fail(409, "NOT_READY", "Combined review is unavailable. Reload before retrying.");
+    return { proposal, noCatalogChanges: false, business: snapshot.business, productDraftIds: snapshot.draftRevisions.map(ref => ref.id), incompleteDraftIds: snapshot.incompleteDraftIds };
   }
 
   async tool(owner: WorkspaceOwner, callId: string, name: ClientToolName, raw: unknown, requestKey: string): Promise<unknown> {

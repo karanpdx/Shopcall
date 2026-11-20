@@ -13,10 +13,12 @@ export type SavedDraft = DraftPatch & { id: string; imageAssetId?: string | null
 export type WorkspaceDraft = WorkingProductDraft & { ready?: boolean; missing?: string[]; imageUrl?: string | null };
 export type CallSnapshot = { call: WorkingCall; drafts: WorkspaceDraft[] };
 export type UploadedCapture = { captureId: string; productDraftId: string; thumbnailUrl: string; draft?: WorkingProductDraft };
-export type ProposalSummary = { id: string; expiresAt: string; approvalNonce: string; items: { label: string; before: string; after: string }[]; publishesInformation?: boolean; snapshotRevision?: number; batch?: CatalogBatch };
+export type ProposalSummary = { id: string; expiresAt: string; approvalNonce: string; items: { label: string; before: string; after: string }[]; publishesInformation?: boolean; snapshotRevision?: number; batch?: CatalogBatch; omittedDraftCount?: number; catalogApplied?: boolean };
+export type CombinedCallReview = { proposal: CatalogBatch | null; business: { name: string; contactEmail: string; description: string | null }; productDraftIds: string[]; incompleteDraftIds: string[]; noCatalogChanges?: boolean };
 export type ProductMatch = { productId: string; title: string; imageUrl: string | null };
-export type BackendBuildStatus = BackendBuildJob & { workflow?: { job: BuildJob | null; task: string | null; blocked: boolean; requiresReconciliation: boolean } };
-export type UiBuildStatus = BuildJob & { backendStatus: Pick<BackendBuildJob, "buildStatus" | "publicationStatus">; requiresAttention: boolean; task: string | null };
+export type WorkflowTask = { id: string; role: string };
+export type BackendBuildStatus = BackendBuildJob & { workflow?: { job: BuildJob | null; task: WorkflowTask | null; blocked: boolean; requiresReconciliation: boolean } };
+export type UiBuildStatus = BuildJob & { backendStatus: Pick<BackendBuildJob, "buildStatus" | "publicationStatus">; requiresAttention: boolean; task: WorkflowTask | null };
 
 const ownerAssetUrl = (assetId: string) => `/api/assets/${encodeURIComponent(assetId)}`;
 
@@ -98,6 +100,7 @@ export function createApiClient(fetcher: typeof fetch = (...args) => fetch(...ar
       return response.ok ? { ok: true, data: { ...response.data, thumbnailUrl: ownerAssetUrl(response.data.captureId) } } : response;
     },
     proposeProduct: (callId: string, draftId: string) => request<{ proposal: CatalogBatch }>("POST", `/api/calls/${id(callId)}/drafts/${id(draftId)}/proposal`, {}),
+    proposeCallReview: (callId: string, input: { name: string; contactEmail: string; idempotencyKey: string }) => request<CombinedCallReview>("POST", `/api/calls/${id(callId)}/review`, input),
     proposeCatalogChanges: (input: { callId: string; expectedCatalogRevision: number; idempotencyKey: string; changes: ProductChange[] }) => request<CatalogBatch>("POST", "/api/catalog/proposals", input),
     getCatalogProposal: (proposalId: string) => request<CatalogBatch>("GET", `/api/catalog/proposals/${id(proposalId)}`),
     async reviewCatalogProposal(proposalId: string): Promise<ApiResult<ProposalSummary>> {

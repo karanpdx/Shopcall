@@ -11,6 +11,7 @@ All responses use B's `ApiResult<T>`. New private routes use `requireOwner` plus
 | `POST /api/calls` | `{ mode: "create" | "update", idempotencyKey }` | `{ call, drafts }`; call UUID and stable `publicationReviewId` |
 | `GET /api/calls/:id` | — | `{ call, drafts }`; readiness, missing fields and private image URLs included |
 | `POST /api/calls/:id/end` | — | Ended call; does not discard staged fields/photos |
+| `POST /api/calls/:id/review` | `{ name, contactEmail, idempotencyKey }` from owner UI | One combined `{ proposal, noCatalogChanges, business, productDraftIds, incompleteDraftIds }`; see default flow below |
 | `POST /api/calls/:id/drafts` | `{ idempotencyKey, proposedTitle? }` | Blank/partial working product draft with stable ID |
 | `PATCH /api/calls/:id/drafts/:draftId` | Partial `{ title, description, priceMinor, currencyCode, quantityOnHand, inventoryTracked }` | Saved draft and readiness; does not publish |
 | `POST /api/calls/:id/drafts/:draftId/images` | Multipart `file` + optional `X-Captured-At` ISO header, **or** JSON `{ imageAssetId, capturedAt }` for an existing B-uploaded owner asset | `{ captureId, productDraftId, thumbnailUrl, draft, ready, missing, saved: true, published: false }` |
@@ -23,6 +24,12 @@ Session owner/business are always derived from cookie, never request body. A cal
 The initial B product schema supports USD and tracked inventory. `currencyCode` other than USD and `inventoryTracked: false` are rejected with a clarification message. Missing price or stock stays absent; zero is valid. No inferred/default stock is inserted.
 
 ## Person A hookup
+
+**Default Finish flow uses one combined review.** End audio immediately, then POST `/api/calls/:id/review` with owner-editable business name/contact and one stable retry key. The backend combines all ready, unapproved captured products and changed business profile fields into one atomic B batch. Incomplete drafts remain saved and are listed explicitly; they never keep the microphone open. If there are no ready products and no existing published products, preparation returns `NOT_READY` with saved/ended status rather than queueing an empty storefront.
+
+Response is `{ proposal: CatalogBatch | null, noCatalogChanges: boolean, business: {name,contactEmail,description}, productDraftIds, incompleteDraftIds }`. Show exact combined summary and public contact consent once. A single explicit **Confirm and publish** button obtains owner-only review nonce, approves that batch, reloads business/catalog revision, then requests the Replit build. On build failure after successful catalog approval, retry only the build; do not create or reapprove products. Approved batch replay returns the same batch. If canonical products/profile already match and nothing new is ready, `proposal: null, noCatalogChanges: true` allows the same explicit publication review to proceed directly to build.
+
+Preparing a combined batch rejects/reconciles pending individual/older aggregate previews so they cannot later create duplicate products. Already-approved drafts are excluded. The exact selected product revisions, profile, expected catalog revision and request payload are durably frozen before B proposal creation; unknown outcomes replay the same key/input. No confirmation nonce or apply authority is returned by preparation, and it works after hangup without restarting audio. The lower-level product review endpoints below remain available for recovery/advanced UI; they are not extra required confirmation steps in the default flow.
 
 1. Authenticate via B's login, create call once with a stable retry idempotency key, retain returned call UUID for reconnect.
 2. Request `/api/voice/session` and use the returned signed URL with ElevenLabs SDK. Never log/persist/send credential to analytics. Camera stream stays independent of this audio session.
@@ -51,6 +58,6 @@ Product proposal preparation freezes exact working draft revision/catalog revisi
 
 ## Validation and limits
 
-Nine integration tests exercise actual B auth/SQLite/route handlers and filesystem image upload; provider credential issuance is injected/mocked and no actual conversation, TTS or network credential request runs in these tests. Tests cover owner/origin isolation, partial drafts, post-call persistence/corrections, real ID-bound image upload, complete proposals without mutation, multi-match lookup, combined update preview, uploaded asset ownership, rejected-draft revision, unknown-proposal recovery and proposal preparation races.
+Nine base integration tests plus three combined-review tests exercise actual B auth/SQLite/route handlers and filesystem image upload; provider credential issuance is injected/mocked and no actual conversation, TTS or network credential request runs in these tests. Tests cover owner/origin isolation, partial drafts, post-call persistence/corrections, real ID-bound image upload, complete proposals without mutation, multi-match lookup, combined update preview, uploaded asset ownership, rejected-draft revision, unknown-proposal recovery, proposal preparation races, one-batch two-product/profile approval, individual-preview reconciliation and unchanged-catalog/no-product outcomes.
 
 The workspace uses B's configured SQLite persistence; deployment still requires a durable volume or database migration. No UI was edited in this lane, so A still must connect controls/review panels to these endpoints. No claims of live browser voice, automatic deployment or end-to-end production acceptance are established by these tests.

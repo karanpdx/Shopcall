@@ -5,9 +5,9 @@ import { useRouter } from "next/navigation";
 import { ConversationProvider, useConversation, useConversationClientTool } from "@elevenlabs/react";
 import { Camera, CameraOff, Mic, MicOff, PhoneOff, ShoppingBag, SwitchCamera, X } from "lucide-react";
 import { CLIENT_TOOL_NAMES } from "../../../contracts/integrations";
-import type { ProductChange } from "../../../contracts/api";
-import { createApiClient, flattenWorkingDraft, type CallSnapshot, type DraftPatch, type OwnerSession, type ProposalSummary } from "../api";
+import { createApiClient, flattenWorkingDraft, summarizeBatch, type CallSnapshot, type DraftPatch, type OwnerSession, type ProposalSummary } from "../api";
 import { useCamera } from "../camera";
+import { checkMicrophone } from "../mediaPermission";
 import { createClientTools } from "../clientTools";
 import { draftsReducer, initialDrafts, formatMoney } from "../drafts";
 import { DraftTray } from "./DraftTray";
@@ -16,7 +16,7 @@ import { ConsentNotice } from "./ConsentNotice";
 import { Shell } from "./Shell";
 
 type Load = { state: "loading" | "login" } | { state: "error"; message: string } | { state: "ready"; session: OwnerSession };
-type Pending = { kind: "catalog_change" | "publish"; proposal: ProposalSummary; idempotencyKey: string; draftId?: string; continueReview?: boolean };
+type Pending = { kind: "catalog_change" | "publish"; proposal: ProposalSummary; idempotencyKey: string; draftId?: string; productDraftIds?: string[]; approvedRevision?: number };
 const CALL_STORAGE = "shopcall:working-call";
 const JOB_STORAGE = "shopcall:last-job";
 
@@ -48,6 +48,7 @@ function CallRoom() {
   const approvedDrafts = useRef(new Set<string>());
   const profileEdited = useRef({ name: false, contact: false });
   const objectUrls = useRef(new Set<string>());
+  const reviewRequestKeys = useRef(new Map<string, string>());
 
   const conversation = useConversation({
     onError: () => setCallError("Voice connection interrupted. Your saved drafts remain available; reconnect or finish and review."),
@@ -152,6 +153,9 @@ function CallRoom() {
     const generation = ++startGeneration.current;
     setPhase("starting"); setCallError(null);
     try {
+      const microphoneError = await checkMicrophone(navigator.mediaDevices);
+      if (generation !== startGeneration.current) return;
+      if (microphoneError) { setPhase("idle"); setCallError(microphoneError); return; }
       const current = await ensureWorkspace();
       if (generation !== startGeneration.current) return;
       const credential = await api.createVoiceSession(current.call.id);
@@ -204,36 +208,32 @@ function CallRoom() {
     const latest = await api.getCall(current.call.id);
     if (!latest.ok) { setCallError(latest.error.message); return; }
     await hydrate(latest.data);
-    for (const draft of latest.data.drafts) {
-      if (approvedDrafts.current.has(draft.id)) continue;
-      if (!draft.ready) { setCallError("Complete each product's name, price, stock and photo before review. You can edit below without another call."); return; }
-      const proposed = await api.proposeProduct(current.call.id, draft.id);
-      if (!proposed.ok) { setCallError(proposed.error.message); return; }
-      await openCatalogReview(proposed.data.proposal.id, { draftId: draft.id, continueReview: true }); return;
-    }
     const business = await api.getBusiness();
     if (!business.ok) { setCallError(business.error.message); return; }
     const name = (profileEdited.current.name ? live.current.ownerName.trim() : latest.data.call.brief.name) || live.current.ownerName.trim() || business.data.name;
     const contact = (profileEdited.current.contact ? live.current.contactEmail.trim() : latest.data.call.brief.contactEmail) || live.current.contactEmail.trim() || business.data.contactEmail;
-    if (!contact || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contact)) { setCallError("Enter the public contact email below before publishing."); return; }
-    const patch: Record<string, string> = {};
-    if (name !== business.data.name) patch.name = name;
-    if (contact !== business.data.contactEmail) patch.contactEmail = contact;
-    if (latest.data.call.brief.description && latest.data.call.brief.description !== business.data.description) patch.description = latest.data.call.brief.description;
-    if (Object.keys(patch).length) {
-      const proposed = await api.proposeCatalogChanges({ callId: current.call.id, expectedCatalogRevision: business.data.catalogRevision, idempotencyKey: crypto.randomUUID(), changes: [{ type: "update_storefront", patch } as ProductChange] });
-      if (!proposed.ok) { setCallError(proposed.error.message); return; }
-      await openCatalogReview(proposed.data.id, { continueReview: true }); return;
-    }
+    if (!contact || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contact)) { setCallError("Enter your public contact email below, then review once."); return; }
+    const signature = JSON.stringify({ callId: current.call.id, name, contactEmail: contact, drafts: latest.data.drafts.map(draft => [draft.id, draft.revision]) });
+    let requestKey = reviewRequestKeys.current.get(signature);
+    if (!requestKey) { requestKey = crypto.randomUUID(); reviewRequestKeys.current.set(signature, requestKey); }
+    const combined = await api.proposeCallReview(current.call.id, { name, contactEmail: contact, idempotencyKey: requestKey });
+    if (!combined.ok) { setCallError(combined.error.message); return; }
     const products = await api.getProducts();
     if (!products.ok) { setCallError(products.error.message); return; }
-    const published = products.data.filter(product => product.isPublished);
-    if (!published.length) { setCallError("Approve at least one product before building the storefront."); return; }
+    const currentProducts = products.data.filter(product => product.isPublished);
+    const batch = combined.data.proposal;
+    if (!batch && !currentProducts.length) { setCallError("Add a complete product with its photo, price and stock before publishing. Incomplete drafts stay saved for later."); return; }
+    const summary: ProposalSummary = batch ? summarizeBatch(batch) : {
+      id: latest.data.call.publicationReviewId, expiresAt: new Date(Date.now() + 10 * 60_000).toISOString(), approvalNonce: "",
+      items: currentProducts.map(product => ({ label: product.name, before: "Saved listing", after: `${formatMoney(product.priceCents, "USD")} · ${product.inventoryCount === 0 ? "Sold out" : `${product.inventoryCount} in stock`}` })),
+    };
+    summary.snapshotRevision = business.data.catalogRevision;
+    if (batch && batch.status !== "approved") summary.items.push(...currentProducts.map(product => ({ label: product.name, before: "Existing saved listing", after: `${formatMoney(product.priceCents, "USD")} · ${product.inventoryCount} in stock` })));
+    summary.omittedDraftCount = combined.data.incompleteDraftIds.length;
+    summary.catalogApplied = !batch || batch.status === "approved";
+    setContactEmail(combined.data.business.contactEmail); setOwnerName(combined.data.business.name);
     setSheetOpen(false);
-    setReview({ kind: "publish", idempotencyKey: crypto.randomUUID(), proposal: {
-      id: latest.data.call.publicationReviewId, expiresAt: new Date(Date.now() + 10 * 60_000).toISOString(), approvalNonce: "", snapshotRevision: business.data.catalogRevision,
-      items: published.map(product => ({ label: product.name, before: "Saved listing", after: `${formatMoney(product.priceCents, "USD")} · ${product.inventoryCount === 0 ? "Sold out" : `${product.inventoryCount} in stock`}` })),
-    } });
+    setReview({ kind: "publish", idempotencyKey: crypto.randomUUID(), proposal: summary, productDraftIds: combined.data.productDraftIds, approvedRevision: summary.catalogApplied ? business.data.catalogRevision : undefined });
   }
   async function finishAndReview() { await endCall(); await reviewNext(); }
   async function confirmReview() {
@@ -243,23 +243,41 @@ function CallRoom() {
       const response = await api.confirmCatalogProposal(review.proposal.id, review.proposal.approvalNonce, review.idempotencyKey);
       setReviewBusy(false);
       if (!response.ok) { setReviewError(response.error.message); return; }
-      if (review.draftId) approvedDrafts.current.add(review.draftId);
       setReview(null); tell("Owner clicked confirmation. Backend applied the reviewed changes successfully.");
       const owner = await api.getSession(); if (owner.ok) setLoad({ state: "ready", session: owner.data });
-      if (review.continueReview) await reviewNext();
-      else await refreshWorkspace();
-    } else {
-      const style = live.current.snapshot?.call.brief.style ?? "A clear responsive storefront using the approved business story and original product photos.";
-      const response = await api.createBuild(style, review.proposal.snapshotRevision!);
-      setReviewBusy(false);
-      if (!response.ok) { setReviewError(response.error.message); return; }
-      await endCall(); sessionStorage.setItem(JOB_STORAGE, response.data.id); setLatestJob(response.data.id); setReview(null);
-      router.push(`/status?job=${encodeURIComponent(response.data.id)}`);
+      await refreshWorkspace();
+      return;
     }
+    let approved = review;
+    if (review.proposal.batch && !review.proposal.catalogApplied) {
+      const nonce = await api.reviewCatalogProposal(review.proposal.id);
+      const apply = nonce.ok ? await api.confirmCatalogProposal(review.proposal.id, nonce.data.approvalNonce, review.idempotencyKey) : nonce;
+      if (!apply.ok) {
+        // A lost response may hide a committed batch. Read its durable status before retrying mutations.
+        const persisted = await api.getCatalogProposal(review.proposal.id);
+        if (!persisted.ok || persisted.data.status !== "approved") { setReviewBusy(false); setReviewError(apply.error.message); return; }
+      }
+      for (const draftId of review.productDraftIds ?? []) approvedDrafts.current.add(draftId);
+      approved = { ...review, approvedRevision: review.proposal.batch.expectedCatalogRevision + review.proposal.batch.changes.length, proposal: { ...review.proposal, catalogApplied: true } };
+      setReview(approved);
+    }
+    const business = await api.getBusiness();
+    if (!business.ok) { setReviewBusy(false); setReviewError("Your approved details are saved. Couldn't read the current store revision; retry the build."); return; }
+    if (approved.approvedRevision !== undefined && approved.approvedRevision !== business.data.catalogRevision) {
+      setReviewBusy(false); setReviewError("Your catalog changed after this review. Close this summary and review the current listings before publishing."); return;
+    }
+    approved = { ...approved, approvedRevision: business.data.catalogRevision };
+    setReview(approved);
+    const style = live.current.snapshot?.call.brief.style ?? "A clear responsive storefront using the approved business story and original product photos.";
+    const response = await api.createBuild(style, business.data.catalogRevision);
+    setReviewBusy(false);
+    if (!response.ok) { setReviewError(`Your approved details are saved. The build was not confirmed: ${response.error.message}`); return; }
+    await endCall(); sessionStorage.setItem(JOB_STORAGE, response.data.id); setLatestJob(response.data.id); setReview(null);
+    router.push(`/status?job=${encodeURIComponent(response.data.id)}`);
   }
   async function cancelReview() {
     if (!review) return;
-    if (review.kind === "catalog_change") {
+    if ((review.kind === "catalog_change" || review.proposal.batch) && !review.proposal.catalogApplied) {
       const rejected = await api.rejectCatalogProposal(review.proposal.id);
       if (!rejected.ok) { setReviewError(rejected.error.message); return; }
     }
@@ -280,9 +298,9 @@ function CallRoom() {
     <div className="ft-bottom">
       {captures.length > 0 && <ul className="ft-strip" aria-label="Captured photos">{captures.slice(-6).map(capture => <li key={capture.localId} className={capture.status}><button type="button" onClick={() => { dispatch({ type: "set_active", draftId: capture.draftId }); setSheetOpen(true); }} aria-label={`Photo of ${drafts.byId[capture.draftId].title || "product"}, ${capture.status}`}><img src={capture.thumbnailUrl ?? capture.previewUrl} alt="" /></button></li>)}</ul>}
       {callError && <p className="ft-notice" role="alert">{callError}</p>}
-      {!inCall && <div className="ft-start"><span className="ft-cta">{phase === "ended" ? "Review now, or call again" : "Tap to show what you sell"}</span><p className="ft-fine">Physical inventory in. A storefront you can maintain by voice. Powered by Replit.</p>{latestJob && <Link className="ft-link" href={`/status?job=${encodeURIComponent(latestJob)}`}>Storefront status</Link>}</div>}
+      {!inCall && <div className="ft-start"><span className="ft-cta">{phase === "ended" ? "Review now, or call again" : "Tap to show what you sell"}</span><p className="ft-fine">Physical inventory in. A storefront you can maintain by voice. Powered by Replit.</p><button type="button" className="btn primary" onClick={startCall}>{phase === "ended" ? "Call again" : "Start voice call"}</button>{latestJob && <Link className="ft-link" href={`/status?job=${encodeURIComponent(latestJob)}`}>Storefront status</Link>}</div>}
       {camera.state === "denied" && <p className="ft-fine">Camera blocked. Keep talking and upload product photos instead.</p>}
-      <div className="ft-controls" role="group" aria-label="Call controls"><button type="button" className="ft-round" disabled={!inCall} aria-pressed={conversation.isMuted} aria-label={conversation.isMuted ? "Unmute" : "Mute"} onClick={() => conversation.setMuted(!conversation.isMuted)}>{conversation.isMuted ? <MicOff /> : <Mic />}</button><button type="button" className="ft-round" aria-pressed={camera.state === "on"} aria-label={camera.state === "on" ? "Turn camera off" : "Turn camera on"} onClick={() => camera.state === "on" ? camera.stop() : camera.start()} disabled={camera.state === "starting"}>{camera.state === "on" ? <Camera /> : <CameraOff />}</button><button type="button" className="ft-round" aria-label="Switch camera" onClick={camera.flip} disabled={camera.state !== "on" || !camera.canSwitch}><SwitchCamera /></button><button type="button" className="ft-round end" aria-label="End call" onClick={endCall}><PhoneOff /></button></div>
+      <div className="ft-controls" role="group" aria-label="Call controls"><button type="button" className="ft-round" disabled={phase === "starting"} aria-pressed={inCall && conversation.isMuted} aria-label={!inCall ? "Start voice call with microphone" : conversation.isMuted ? "Unmute" : "Mute"} onClick={() => inCall ? conversation.setMuted(!conversation.isMuted) : startCall()}>{conversation.isMuted ? <MicOff /> : <Mic />}</button><button type="button" className="ft-round" aria-pressed={camera.state === "on"} aria-label={camera.state === "on" ? "Turn camera off" : "Turn camera on"} onClick={() => camera.state === "on" ? camera.stop() : camera.start()} disabled={camera.state === "starting"}>{camera.state === "on" ? <Camera /> : <CameraOff />}</button><button type="button" className="ft-round" aria-label="Switch camera" onClick={camera.flip} disabled={camera.state !== "on" || !camera.canSwitch}><SwitchCamera /></button><button type="button" className="ft-round end" aria-label="End call" onClick={endCall}><PhoneOff /></button></div>
       <div className="draft-actions"><button type="button" className="btn primary" onClick={finishAndReview} disabled={!snapshot}>Finish &amp; review</button><button type="button" className="btn ghost" onClick={addProduct}>Add product</button>{inCall && <button type="button" className="btn ghost" onClick={() => tell("Owner chose to skip optional story/style questions. Capture only product identity, exact price, quantity and photos, then offer review. Do not require optional answers.")}>Skip optional questions</button>}</div>
     </div>
     {sheetOpen && <div className="ft-sheet" role="dialog" aria-modal="true" aria-label="Review inventory"><div className="ft-sheet-head"><span className="ft-grabber" aria-hidden="true" /><button type="button" className="ft-close" aria-label="Close products" onClick={() => setSheetOpen(false)}><X size={20} /></button></div><DraftTray state={drafts} cameraOn={camera.state === "on"} onSelect={id => dispatch({ type: "set_active", draftId: id })} onCapture={id => { void captureForDraft(id); }} onUpload={(id, file) => { void uploadToDraft(id, file); }} onRemoveCapture={(id, localId) => dispatch({ type: "capture_removed", draftId: id, localId })} onSave={saveDraft} /><div className="auth-form"><label className="field">Business name<input value={ownerName} onChange={event => { profileEdited.current.name = true; setOwnerName(event.target.value); }} maxLength={160} /></label><label className="field">Public contact email<input type="email" value={contactEmail} onChange={event => { profileEdited.current.contact = true; setContactEmail(event.target.value); }} /></label></div><p className="muted">Ending the call saves drafts. Nothing is approved or published until you review and confirm. Optional story and style can wait.</p><button type="button" className="btn primary ft-publish" onClick={finishAndReview}>Review saved products &amp; storefront</button>{callError && <p className="error" role="alert">{callError}</p>}</div>}

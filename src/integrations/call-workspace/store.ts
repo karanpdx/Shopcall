@@ -3,6 +3,7 @@ import type Database from "better-sqlite3";
 import { z } from "zod";
 import { fail } from "../../server/http";
 import { inventoryCount, priceCents } from "../../contracts/api";
+import type { ProductChange } from "../../contracts/api";
 
 export type WorkspaceOwner = { ownerId: string; businessId: string };
 export const draftPatch = z.object({
@@ -17,6 +18,7 @@ export type WorkingCall = { id: string; ownerId: string; businessId: string; mod
 export type WorkingProductDraft = { id: string; callId: string; businessId: string; fields: DraftFields; imageAssetId: string | null; capturedAt: string | null; revision: number; proposalId: string | null; proposalRevision: number | null; proposalCatalogRevision: number | null; createdAt: string; updatedAt: string };
 type CallRow = Omit<WorkingCall, "brief"> & { brief: string };
 type DraftRow = Omit<WorkingProductDraft, "fields"> & { fields: string };
+export type CallReviewSnapshot = { id: string; requestKey: string; requestHash: string; expectedCatalogRevision: number; business: { name: string; contactEmail: string; description: string | null }; changes: ProductChange[]; draftRevisions: { id: string; revision: number }[]; incompleteDraftIds: string[]; proposalId: string | null };
 const timestamp = () => new Date().toISOString();
 
 /** Additive workspace tables in B's DB. Canonical catalog is changed only by B's owner-confirmed batch API. */
@@ -37,6 +39,11 @@ export class CallWorkspaceStore {
     CREATE INDEX IF NOT EXISTS shopcall_working_drafts_call_v1 ON shopcall_working_drafts_v1(callId);
     CREATE TABLE IF NOT EXISTS shopcall_voice_attempts_v1 (ownerId TEXT NOT NULL, callId TEXT NOT NULL, attemptedAt TEXT NOT NULL);
     CREATE INDEX IF NOT EXISTS shopcall_voice_attempts_owner_v1 ON shopcall_voice_attempts_v1(ownerId,attemptedAt);`);
+    db.exec(`CREATE TABLE IF NOT EXISTS shopcall_combined_reviews_v1 (
+      id TEXT PRIMARY KEY,callId TEXT NOT NULL REFERENCES shopcall_calls_v1(id),ownerId TEXT NOT NULL,businessId TEXT NOT NULL,
+      requestKey TEXT NOT NULL,requestHash TEXT NOT NULL,snapshot TEXT NOT NULL,proposalId TEXT,createdAt TEXT NOT NULL,
+      UNIQUE(callId,requestKey)
+    );`);
     const columns = db.prepare("PRAGMA table_info(shopcall_working_drafts_v1)").all() as { name: string }[];
     if (!columns.some(column => column.name === "proposalCatalogRevision")) db.exec("ALTER TABLE shopcall_working_drafts_v1 ADD COLUMN proposalCatalogRevision INTEGER");
   }
@@ -164,6 +171,55 @@ export class CallWorkspaceStore {
   clearRejectedProposal(owner: WorkspaceOwner, callId: string, draftId: string, proposalId: string) {
     this.getDraft(owner, callId, draftId);
     this.db.prepare("UPDATE shopcall_working_drafts_v1 SET proposalId=NULL,proposalRevision=NULL,proposalCatalogRevision=NULL,revision=revision+1,updatedAt=? WHERE id=? AND proposalId=?").run(timestamp(), draftId, proposalId);
+  }
+
+  getCombinedReview(owner: WorkspaceOwner, callId: string, requestKey: string): CallReviewSnapshot | null {
+    this.getCall(owner, callId);
+    const row = this.db.prepare("SELECT snapshot,proposalId FROM shopcall_combined_reviews_v1 WHERE callId=? AND ownerId=? AND businessId=? AND requestKey=?").get(callId, owner.ownerId, owner.businessId, requestKey) as { snapshot: string; proposalId: string | null } | undefined;
+    return row ? { ...JSON.parse(row.snapshot) as CallReviewSnapshot, proposalId: row.proposalId } : null;
+  }
+
+  getUnlinkedCombinedReview(owner: WorkspaceOwner, callId: string): CallReviewSnapshot | null {
+    this.getCall(owner, callId);
+    const row = this.db.prepare("SELECT snapshot FROM shopcall_combined_reviews_v1 WHERE callId=? AND ownerId=? AND businessId=? AND proposalId IS NULL ORDER BY createdAt LIMIT 1").get(callId, owner.ownerId, owner.businessId) as { snapshot: string } | undefined;
+    return row ? JSON.parse(row.snapshot) as CallReviewSnapshot : null;
+  }
+
+  freezeCombinedReview(owner: WorkspaceOwner, callId: string, input: Omit<CallReviewSnapshot, "id" | "proposalId">): CallReviewSnapshot {
+    return this.db.transaction(() => {
+      this.getCall(owner, callId);
+      const existing = this.getCombinedReview(owner, callId, input.requestKey);
+      if (existing) {
+        if (existing.requestHash !== input.requestHash) fail(409, "CONFLICT", "Review request key belongs to different business details.");
+        return existing;
+      }
+      for (const ref of input.draftRevisions) {
+        const draft = this.getDraft(owner, callId, ref.id);
+        if (draft.revision !== ref.revision || draft.proposalRevision !== null) fail(409, "STALE_REVISION", "Products changed while combined review was prepared. Reload and review again.");
+      }
+      const snapshot: CallReviewSnapshot = { ...input, id: randomUUID(), proposalId: null };
+      this.db.prepare("INSERT INTO shopcall_combined_reviews_v1(id,callId,ownerId,businessId,requestKey,requestHash,snapshot,createdAt) VALUES(?,?,?,?,?,?,?,?)").run(snapshot.id, callId, owner.ownerId, owner.businessId, snapshot.requestKey, snapshot.requestHash, JSON.stringify(snapshot), timestamp());
+      for (const ref of input.draftRevisions) this.db.prepare("UPDATE shopcall_working_drafts_v1 SET proposalRevision=revision,proposalCatalogRevision=? WHERE id=?").run(input.expectedCatalogRevision, ref.id);
+      return snapshot;
+    }).immediate();
+  }
+
+  linkCombinedReview(owner: WorkspaceOwner, callId: string, snapshot: CallReviewSnapshot, proposalId: string) {
+    return this.db.transaction(() => {
+      this.getCall(owner, callId);
+      for (const ref of snapshot.draftRevisions) this.linkProposal(owner, callId, ref.id, ref.revision, proposalId);
+      this.db.prepare("UPDATE shopcall_combined_reviews_v1 SET proposalId=? WHERE id=? AND callId=? AND ownerId=? AND businessId=?").run(proposalId, snapshot.id, callId, owner.ownerId, owner.businessId);
+    }).immediate();
+  }
+
+  releaseRejectedCombinedReview(owner: WorkspaceOwner, callId: string, snapshot: CallReviewSnapshot) {
+    return this.db.transaction(() => {
+      this.getCall(owner, callId);
+      const row = this.getCombinedReview(owner, callId, snapshot.requestKey);
+      if (!row || row.id !== snapshot.id || row.proposalId) return;
+      for (const ref of snapshot.draftRevisions) this.releaseRejectedReservation(owner, callId, ref.id, ref.revision);
+      this.db.prepare("DELETE FROM shopcall_combined_reviews_v1 WHERE id=? AND proposalId IS NULL").run(snapshot.id);
+    }).immediate();
   }
 
   /** Durable rate-limit reservation before credential issuance; failures still count. */

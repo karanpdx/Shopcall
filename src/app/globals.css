@@ -195,6 +195,24 @@ button:focus-visible, .btn:focus-visible, input:focus-visible, label.btn:focus-w
 .ft.cam-off .ft-round.end { background: #f0604f; color: #fff; }
 .ft-round { width: 58px; height: 58px; border-radius: 22px; }
 .ft-sheet { border-radius: 28px 28px 0 0; font-family: ui-rounded, -apple-system, system-ui, sans-serif; }
+
+/* Media remains behind the call controls; generic direct-child positioning must not put video in flex flow. */
+.ft > video.ft-video { position: absolute; inset: 0; z-index: 0; pointer-events: none; }
+.ft > .ft-avatar { position: absolute; inset: 0; z-index: 0; }
+.ft > .ft-top { position: absolute; inset: 0 0 auto; z-index: 3; }
+.ft > .ft-chip { position: absolute; top: calc(env(safe-area-inset-top) + 76px); left: 50%; transform: translateX(-50%); }
+.ft > .ft-bottom { position: absolute; inset: auto 0 0; z-index: 4; max-height: calc(100dvh - env(safe-area-inset-top) - 86px); overflow-y: auto; overscroll-behavior: contain; }
+.ft-controls { flex-shrink: 0; gap: clamp(8px, 3vw, 18px); padding-inline: 16px; max-width: calc(100vw - 24px); }
+.ft-bottom > .draft-actions { justify-content: center; }
+.ft-video[hidden] { display: none; }
+@media (max-height: 540px) {
+  .ft-bottom { gap: 6px; padding: 6px 12px calc(env(safe-area-inset-bottom) + 8px); }
+  .ft-start .ft-cta, .ft-start .ft-fine, .ft-strip { display: none; }
+  .ft-controls { padding-block: 8px; gap: 10px; }
+  .ft-round { width: 44px; height: 44px; border-radius: 16px; }
+  .ft-avatar .orb { width: min(28vw, 120px); }
+  .ft-notice { font-size: 12px; line-height: 1.35; padding: 6px 10px; }
+}
 @media (prefers-reduced-motion: no-preference) {
   .orb.idle { animation: orb-breathe 3.6s ease-in-out infinite; }
   .orb.listening { animation: orb-breathe 2.4s ease-in-out infinite; }

@@ -241,7 +241,15 @@ export class SqliteRepository implements ShopCallRepository {
    * concurrent approvals serialize and the second sees status != pending. Any failure rolls everything back.
    */
   async approveDraft(businessId: string, draftId: string): Promise<DraftApprovalResponse> {
-    return this.db.transaction(() => this.approveDraftInTransaction(businessId, draftId)).immediate();
+    return this.db.transaction(() => {
+      this.assertStandaloneDraft(businessId, draftId);
+      return this.approveDraftInTransaction(businessId, draftId);
+    }).immediate();
+  }
+
+  private assertStandaloneDraft(businessId: string, draftId: string) {
+    const linked = this.db.prepare("SELECT b.id FROM catalog_batches b, json_each(b.draft_ids) item WHERE b.business_id=? AND item.value=? LIMIT 1").get(businessId, draftId);
+    if (linked) fail(409, "CONFLICT", "This draft belongs to a combined proposal; approve or reject the complete review.");
   }
 
   private approveDraftInTransaction(businessId: string, draftId: string, expectedRevisionOverride?: number): DraftApprovalResponse {
@@ -316,6 +324,7 @@ export class SqliteRepository implements ShopCallRepository {
 
   async rejectDraft(businessId: string, draftId: string): Promise<Draft> {
     return this.db.transaction(() => {
+      this.assertStandaloneDraft(businessId, draftId);
       const draft = this.draftRow(businessId, draftId);
       if (draft.status !== "pending") fail(409, "CONFLICT", `Draft is already ${draft.status}.`);
       this.db.prepare("UPDATE drafts SET status = 'rejected', resolved_at = ? WHERE id = ? AND status = 'pending'").run(now(), draftId);

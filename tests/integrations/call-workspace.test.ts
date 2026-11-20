@@ -181,7 +181,7 @@ test("call workspace survives actual SQLite close/reopen and retains original ow
 
 function catalogPort(): WorkspaceCatalogRepository {
   const repo = repository();
-  return { getBusiness: repo.getBusiness.bind(repo), listProducts: repo.listProducts.bind(repo), getProduct: repo.getProduct.bind(repo), proposeCatalogBatch: repo.proposeCatalogBatch.bind(repo), getCatalogBatch: repo.getCatalogBatch.bind(repo), getBuildJob: repo.getBuildJob.bind(repo) };
+  return { getBusiness: repo.getBusiness.bind(repo), listProducts: repo.listProducts.bind(repo), getProduct: repo.getProduct.bind(repo), proposeCatalogBatch: repo.proposeCatalogBatch.bind(repo), getCatalogBatch: repo.getCatalogBatch.bind(repo), rejectCatalogBatch: repo.rejectCatalogBatch.bind(repo), getBuildJob: repo.getBuildJob.bind(repo) };
 }
 
 test("unknown proposal outcome freezes exact input and replays same key after catalog changes; rejected draft can be corrected", async () => {
