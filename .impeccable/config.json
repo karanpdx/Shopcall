@@ -1,0 +1,14 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "overused-font",
+        "value": "arial",
+        "createdAt": "2026-11-20T22:46:51.889Z",
+        "reason": "Codex selected Arial intentionally for dependency-free scaffold body text, paired with Georgia display headings; full call UI typography belongs to Person A."
+      }
+    ]
+  }
+}
