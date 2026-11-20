@@ -283,7 +283,10 @@ test("retries exhaust into send_failed", async () => {
   const rec = outbox.all()[0];
   assert.equal(rec.status, "send_failed");
   assert.match(rec.lastError ?? "", /retries exhausted/);
-  assert.equal((await getPublicationNotificationStatus(outbox, JOB)).status, "send_failed");
+  const view = await getPublicationNotificationStatus(outbox, JOB);
+  assert.equal(view.status, "send_failed");
+  assert.equal(view.errorCode, "SEND_FAILED");
+  assert.ok(!("lastError" in view), "raw error text must not reach status view");
 });
 
 test("2xx without id is treated as unknown outcome and retried", async () => {
@@ -315,6 +318,8 @@ test("publication source outage does not send and retries later", async () => {
   await processNotificationOutbox(deps);
   assert.equal(http.calls.length, 0);
   assert.equal(outbox.all()[0].status, "pending");
+  assert.equal(outbox.all()[0].lastError, "publication source unavailable");
+  assert.ok(!outbox.all()[0].lastError?.includes("db down"));
 });
 
 test("concurrent workers do not double-send a leased record", async () => {

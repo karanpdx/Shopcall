@@ -43,7 +43,7 @@ Server-only. Never import from client components.
 | `enqueuePublicationReadyEmail(deps, { jobId })` | Loads publication from **trusted source**, enforces verification, renders + stores payload in outbox. Idempotent per `jobId+catalogRevision`. Sends nothing. Returns `EnqueueResult`. |
 | `processNotificationOutbox(deps, { limit? })` | Worker step. Claims due rows (lease), **re-checks verification**, sends with stable `Idempotency-Key`, sets `accepted` / retry / `send_failed` / `cancelled`. Returns `ProcessSummary`. |
 | `refreshNotificationDeliveryStatus(deps, { limit? })` | Polls `GET /emails/{id}`; `delivered/opened/clicked/complained` → `delivered`; `bounced/failed/suppressed/canceled` → `delivery_failed`; else stays `accepted`. |
-| `getPublicationNotificationStatus(outbox, jobId)` | Owner-UI projection `{ status \| "none", attempts, lastError, acceptedAt, deliveredAt, nextAttemptAt, ... }`. No recipient/body. |
+| `getPublicationNotificationStatus(outbox, jobId)` | Owner-UI projection `{ status \| "none", attempts, errorCode, providerLastEvent, acceptedAt, deliveredAt, nextAttemptAt, catalogRevision }`. `errorCode` ∈ `RETRYING \| SEND_FAILED \| DELIVERY_FAILED \| PUBLICATION_NOT_VERIFIED`. No recipient, body, or raw error text (raw `lastError` stays in the outbox for operators). |
 | `createInMemoryNotificationOutbox()` | Test/dev outbox. **Not durable.** |
 | `renderPublicationReadyEmail`, `escapeHtml`, `validatePublicUrl` | Pure helpers. |
 | `DEFAULT_RETRY_POLICY` | 6 attempts, 30s→30min exp backoff, 23h retry window, 60s lease. |

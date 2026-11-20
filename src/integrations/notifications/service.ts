@@ -160,8 +160,9 @@ export async function processNotificationOutbox(
     let check: CheckResult;
     try {
       check = await loadVerified(deps.publications, rec.jobId);
-    } catch (err) {
-      await retryOrFail(`publication source error: ${err instanceof Error ? err.message : String(err)}`, null);
+    } catch {
+      // Raw source errors may contain DB/internal detail; caller's logger should capture them.
+      await retryOrFail("publication source unavailable", null);
       continue;
     }
     if (!check.ok || check.url !== rec.publicUrl || check.publication.catalogRevision !== rec.catalogRevision) {
@@ -224,12 +225,19 @@ export async function refreshNotificationDeliveryStatus(
   return out;
 }
 
+export type NotificationViewErrorCode =
+  | "RETRYING"
+  | "SEND_FAILED"
+  | "DELIVERY_FAILED"
+  | "PUBLICATION_NOT_VERIFIED";
+
 export type PublicationNotificationView = {
   status: NotificationStatus | "none";
   catalogRevision: number | null;
   attempts: number;
   providerLastEvent: string | null;
-  lastError: string | null;
+  /** Short category only; raw provider/internal error text stays server-side. */
+  errorCode: NotificationViewErrorCode | null;
   acceptedAt: string | null;
   deliveredAt: string | null;
   nextAttemptAt: string | null;
@@ -242,18 +250,28 @@ export async function getPublicationNotificationStatus(
 ): Promise<PublicationNotificationView> {
   const latest = (await outbox.findByJob(jobId)).sort((a, b) => b.catalogRevision - a.catalogRevision)[0] as OutboxRecord | undefined;
   if (!latest) {
-    return { status: "none", catalogRevision: null, attempts: 0, providerLastEvent: null, lastError: null, acceptedAt: null, deliveredAt: null, nextAttemptAt: null };
+    return { status: "none", catalogRevision: null, attempts: 0, providerLastEvent: null, errorCode: null, acceptedAt: null, deliveredAt: null, nextAttemptAt: null };
   }
   return {
     status: latest.status,
     catalogRevision: latest.catalogRevision,
     attempts: latest.attempts,
     providerLastEvent: latest.providerLastEvent,
-    lastError: latest.lastError,
+    errorCode: viewErrorCode(latest),
     acceptedAt: latest.acceptedAt,
     deliveredAt: latest.deliveredAt,
     nextAttemptAt: latest.status === "pending" ? latest.nextAttemptAt : null,
   };
+}
+
+function viewErrorCode(r: OutboxRecord): NotificationViewErrorCode | null {
+  switch (r.status) {
+    case "send_failed": return "SEND_FAILED";
+    case "delivery_failed": return "DELIVERY_FAILED";
+    case "cancelled": return "PUBLICATION_NOT_VERIFIED";
+    case "pending": return r.lastError ? "RETRYING" : null;
+    default: return null;
+  }
 }
 
 function tagValue(value: string): string {
