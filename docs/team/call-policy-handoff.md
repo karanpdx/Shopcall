@@ -34,6 +34,7 @@ Fact model and missing-field helpers (pure)
 - `getMissingCriticalFields(draft: ProductDraftFacts, ctx: MissingFieldsContext): MissingField[]`: returns `title | price | stock | image` in ask order, each with a reason (`missing | unconfirmed_guess | invalid | currency_unknown | camera_off`).
 - `getMissingStoreFacts(store: StoreFacts): StoreField[]`: returns `business_name | contact_email | public_contact_consent`. Brand, story, style and shipping fields are never included.
 - `isOwnerAuthoritative(source: FactSource): boolean`
+- `resolveCurrencyCode(draft, defaultCurrencyCode?): string | undefined`: owner-sourced currency, else the store default. The gate and the publish review both use it.
 - `CRITICAL_FIELD_ORDER`
 - Types: `FactSource`, `Sourced<T>`, `InventoryFact`, `ImageFact`, `ProductDraftFacts`, `CriticalField`, `MissingReason`, `MissingField`, `MissingFieldsContext`, `StoreFacts`, `StoreField`.
 

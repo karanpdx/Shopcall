@@ -98,9 +98,7 @@ export function getMissingCriticalFields(draft: ProductDraftFacts, ctx: MissingF
   } else if (!moneyMinor.safeParse(price.value).success) {
     missing.push({ field: "price", reason: "invalid" });
   } else {
-    const ownerCurrency =
-      draft.currencyCode && isOwnerAuthoritative(draft.currencyCode.source) ? draft.currencyCode.value : undefined;
-    const code = ownerCurrency ?? ctx.defaultCurrencyCode;
+    const code = resolveCurrencyCode(draft, ctx.defaultCurrencyCode);
     if (!code) missing.push({ field: "price", reason: "currency_unknown" });
     else if (!currency.safeParse(code).success) missing.push({ field: "price", reason: "invalid" });
   }
@@ -119,6 +117,12 @@ export function getMissingCriticalFields(draft: ProductDraftFacts, ctx: MissingF
   }
 
   return missing;
+}
+
+/** Owner-sourced currency, else store default. Vision-sourced currency is ignored. Shared by gate and review. */
+export function resolveCurrencyCode(draft: ProductDraftFacts, defaultCurrencyCode?: string): string | undefined {
+  const owner = draft.currencyCode && isOwnerAuthoritative(draft.currencyCode.source) ? draft.currencyCode.value : undefined;
+  return owner ?? defaultCurrencyCode;
 }
 
 /** Store-level facts required before a publish review. */
@@ -335,7 +339,7 @@ export function composePublishReview(input: PublishReviewInput): PublishReview {
   }
 
   const lines = input.products.map(({ facts }) => {
-    const code = facts.currencyCode?.value ?? input.defaultCurrencyCode!;
+    const code = resolveCurrencyCode(facts, input.defaultCurrencyCode)!;
     return `${facts.title!.value.trim()}, ${formatPrice(facts.priceMinor!.value, code)}, ${formatStock(facts.inventory!.value)}`;
   });
   const count = lines.length === 1 ? "one product" : `${spokenCount(lines.length)} products`;

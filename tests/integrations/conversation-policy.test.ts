@@ -169,6 +169,9 @@ test("publish review refuses while any critical fact is missing", () => {
   if (!missingStock.ok) assert.deepEqual(missingStock.missingProducts, [{ index: 1, missing: [{ field: "stock", reason: "missing" }] }]);
   assert.equal(composePublishReview({ defaultCurrencyCode: "USD", store: { ...store, publicContactConsent: undefined }, products: [{ facts: complete }] }).ok, false);
   assert.equal(composePublishReview({ defaultCurrencyCode: "USD", store, products: [] }).ok, false);
+  const visionCurrency = composePublishReview({ defaultCurrencyCode: "USD", store, products: [{ facts: { ...complete, currencyCode: vision("EUR") } }] });
+  assert.equal(visionCurrency.ok, true);
+  if (visionCurrency.ok) assert.match(visionCurrency.text, /\$24/, "review must use the same owner-authoritative currency as the gate");
   const ok = composePublishReview({ defaultCurrencyCode: "USD", store, products: [{ facts: complete }] });
   assert.equal(ok.ok, true);
   if (ok.ok) assert.match(ok.text, /Mug, \$24, 2 in stock.*a@b\.example.*tap Publish/);
