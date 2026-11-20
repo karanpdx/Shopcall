@@ -69,6 +69,27 @@ test("unknown create outcome blocks mutation replay and redacts provider error",
   await workflow.step(id);
   assert.equal(calls.create, 1);
   assert.equal(JSON.stringify(await store.load(id)).includes("NEVER_PERSIST_THIS"), false);
+  await assert.rejects(workflow.resumeSourceObservation(id, approval), /SOURCE_OBSERVATION_NOT_RETRYABLE/);
+});
+
+test("source observation recovery preserves existing app and rechecks gates without replaying mutations", async t => {
+  const { workflow, store, calls, port } = await fixture(t);
+  const id = randomUUID();
+  await workflow.enqueue(id, approval);
+  const created = await workflow.step(id);
+  const originalObserve = port.observeTask;
+  port.observeTask = async () => ({ state: "blocked", code: "SOURCE_PREFLIGHT_UNVERIFIED" });
+  assert.equal((await workflow.step(id)).phase, "blocked");
+  await assert.rejects(workflow.resumeSourceObservation(id, { ...approval, ownerUserId: "other-owner" }), /RUN_OWNERSHIP_MISMATCH/);
+  const resumed = await workflow.resumeSourceObservation(id, approval);
+  assert.equal(resumed.replId, created.replId);
+  assert.equal(resumed.currentTaskId, "design");
+  assert.equal(resumed.evidence.length, 0);
+  assert.deepEqual(calls, { create: 1, update: 0, publish: 0 });
+  port.observeTask = originalObserve;
+  await workflow.step(id);
+  assert.equal((await store.load(id))?.currentTaskId, "frontend");
+  assert.deepEqual(calls, { create: 1, update: 1, publish: 0 });
 });
 
 test("persisted dispatch intent after crash never blindly creates another app", async t => {

@@ -60,3 +60,35 @@ test("busy provider blocks source evidence, paused permits static-only evidence,
   assert.equal((await observer.observe(run, design)).state, "pending");
   assert.equal((await observer.observe(run, plan.tasks.find(task => task.id === "qa")!)).state, "blocked");
 });
+
+test("design credits readable positive artifacts without depending on a flaky unrelated component", async () => {
+  const f = fixture();
+  const paths: string[] = [];
+  f.client.listAppFiles = async (_id, path) => ({ content: [{ type: "text", text: path === undefined ? "src/" : path === "src" ? "error-boundary.tsx\nApp.tsx\nindex.css\ncomponents/" : "ui/" }] });
+  f.client.readAppFile = async (_id, path) => {
+    paths.push(path);
+    if (path.endsWith("error-boundary.tsx")) throw new Error("provider filesystem temporarily unavailable");
+    return { content: [{ type: "text", text: files[path as keyof typeof files] }] };
+  };
+  const result = await new ReplitArtifactTaskObserver(f.client).observe({ id: "run-a", replId, plan } as BuildRun, plan.tasks.find(task => task.id === "design")!);
+  assert.equal(result.state, "passed");
+  assert.equal(paths.includes("src/error-boundary.tsx"), true);
+  assert.equal(paths.some(path => path.includes("components/ui")), false);
+  if (result.state === "passed") assert.deepEqual(result.evidence.checks, ["approved-style-reference", "design-artifacts", "contact-integration-artifacts"]);
+});
+
+test("catalog write-absence claim requires complete source inventory and transient reads retry only boundedly", async () => {
+  const f = fixture();
+  f.client.listAppFiles = async (_id, path) => ({ content: [{ type: "text", text: path ? "App.tsx\nproxy.ts\nunreadable-server.ts" : "src/" }] });
+  f.client.readAppFile = async (_id, path) => {
+    if (path.endsWith("unreadable-server.ts")) throw new Error("provider filesystem temporarily unavailable");
+    return { content: [{ type: "text", text: files[path as keyof typeof files] }] };
+  };
+  const observer = new ReplitArtifactTaskObserver(f.client);
+  const run = { id: "run-a", replId, plan } as BuildRun;
+  const task = plan.tasks.find(task => task.id === "catalogIntegration")!;
+  assert.equal((await observer.observe(run, task)).state, "pending");
+  assert.equal((await observer.observe(run, task)).state, "pending");
+  assert.deepEqual(await observer.observe(run, task), { state: "blocked", code: "SOURCE_PREFLIGHT_UNVERIFIED" });
+  assert.equal(inspectStaticArtifacts({ artifacts: [{ path: "src/proxy.ts", source: files["src/proxy.ts"] }], digest: "test", complete: false, omittedPaths: ["src/unreadable-server.ts"] }, catalogUrl, plan.id).includes("no-catalog-write-artifacts"), false);
+});
