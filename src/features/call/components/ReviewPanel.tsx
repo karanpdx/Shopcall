@@ -1,0 +1,56 @@
+"use client";
+import { useEffect, useRef, useState } from "react";
+import type { ProposalSummary } from "../api";
+
+type Props = {
+  kind: "catalog_change" | "publish";
+  proposal: ProposalSummary;
+  contactEmail: string | null;
+  busy: boolean;
+  error: string | null;
+  onConfirm: () => void;
+  onCancel: () => void;
+};
+
+/** The only place approval happens: an explicit owner click. Voice can open this, never confirm it. */
+export function ReviewPanel({ kind, proposal, contactEmail, busy, error, onConfirm, onCancel }: Props) {
+  const ref = useRef<HTMLDialogElement>(null);
+  const [photosOk, setPhotosOk] = useState(false);
+  const [contactOk, setContactOk] = useState(false);
+  const expired = new Date(proposal.expiresAt).getTime() < Date.now();
+  const publish = kind === "publish";
+  const canConfirm = !busy && !expired && (!publish || (photosOk && contactOk));
+
+  useEffect(() => {
+    const d = ref.current;
+    if (d && !d.open) d.showModal();
+    return () => d?.close();
+  }, []);
+
+  return (
+    <dialog ref={ref} className="review" aria-labelledby="review-title" onCancel={e => { e.preventDefault(); onCancel(); }}>
+      <h2 id="review-title" className="panel-title">{publish ? "Publish your storefront?" : "Apply these changes?"}</h2>
+      <table className="changes">
+        <thead><tr><th scope="col">Item</th><th scope="col">Now</th><th scope="col">After</th></tr></thead>
+        <tbody>
+          {proposal.items.map((it, i) => (
+            <tr key={i}><th scope="row">{it.label}</th><td>{it.before}</td><td>{it.after}</td></tr>
+          ))}
+        </tbody>
+      </table>
+      {publish && (
+        <fieldset className="acks">
+          <legend>This makes the following public</legend>
+          <label className="check"><input type="checkbox" checked={photosOk} onChange={e => setPhotosOk(e.target.checked)} /> The product photos, names, prices and stock above</label>
+          <label className="check"><input type="checkbox" checked={contactOk} onChange={e => setContactOk(e.target.checked)} /> My contact email{contactEmail ? `: ${contactEmail}` : ""}</label>
+        </fieldset>
+      )}
+      {expired && <p className="error" role="alert">This summary expired. Ask your assistant to prepare it again.</p>}
+      {error && <p className="error" role="alert">{error}</p>}
+      <div className="draft-actions">
+        <button type="button" className="btn primary" disabled={!canConfirm} onClick={onConfirm}>{busy ? "Confirming…" : publish ? "Confirm and publish" : "Confirm changes"}</button>
+        <button type="button" className="btn ghost" onClick={onCancel} disabled={busy}>Not yet</button>
+      </div>
+    </dialog>
+  );
+}
