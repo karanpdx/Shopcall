@@ -111,6 +111,7 @@ function CallRoom() {
 
   async function startCall() {
     setCallError(null);
+    if (load.state === "error") return setCallError(load.message);
     setPhase("starting");
     // One tap: first call brings the camera up with the call. Returning calls stay camera-off.
     if (mode === "create" && camera.state === "off") void camera.start();
@@ -194,7 +195,7 @@ function CallRoom() {
     : mode === "update" ? "Ready to update your store" : "Ready when you are";
   const captures = drafts.order.flatMap(id => drafts.byId[id].captures.map(c => ({ ...c, draftId: id })));
   const readyCount = drafts.order.filter(id => missingFields(drafts.byId[id]).length === 0).length;
-  const notice = load.state === "error" ? load.message : callError;
+  const notice = callError;
 
   return (
     <div className={`ft ${camera.state === "on" ? "cam-on" : "cam-off"}`}>
@@ -203,7 +204,7 @@ function CallRoom() {
       {camera.state !== "on" && (
         <div className="ft-avatar">
           {!inCall ? (
-            <button type="button" className="orb idle" onClick={startCall} disabled={load.state !== "ready"} aria-label={phase === "ended" ? "Call again" : "Tap to call"}>
+            <button type="button" className="orb idle" onClick={startCall} disabled={load.state === "loading"} aria-label={phase === "ended" ? "Call again" : "Tap to call"}>
               <span className="orb-face" aria-hidden="true"><i /><i /></span>
             </button>
           ) : (
@@ -216,7 +217,7 @@ function CallRoom() {
 
       <header className="ft-top">
         <span className="ft-spacer" aria-hidden="true" />
-        <div className="ft-title">
+        <div className={`ft-title ${inCall ? "" : "sr-only"}`}>
           <strong>{businessName ?? "Shopcall"}</strong>
           <span role="status" aria-live="polite">{statusText}</span>
         </div>
@@ -258,8 +259,7 @@ function CallRoom() {
 
         {!inCall ? (
           <div className="ft-start">
-            <span className="ft-cta">{load.state === "loading" ? "One sec…" : phase === "ended" ? "Tap to call again" : "Tap to call"}</span>
-            {phase === "idle" && <p className="ft-fine">Just talk and show what you make. Camera optional, no video recorded, nothing goes live until you say so.</p>}
+            <span className="ft-cta">Tap to call</span>
             {phase === "ended" && session?.latestJobId && <Link className="ft-link" href={`/status?job=${encodeURIComponent(session.latestJobId)}`}>See storefront status</Link>}
           </div>
         ) : (
