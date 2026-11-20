@@ -34,7 +34,7 @@ export function StatusView({ jobId }: { jobId: string | null }) {
     return () => { stopped = true; clearTimeout(timer); };
   }, [api, jobId]);
 
-  if (!jobId) return <div className="panel"><p>No storefront build to show yet.</p><Link className="btn primary" href="/call">Go to your call</Link></div>;
+  if (!jobId) return <div className="panel"><p>No storefront build to show yet.</p><Link className="btn primary" href="/">Back to call</Link></div>;
 
   const url = job ? verifiedUrl(job) : null;
   return (
@@ -55,7 +55,7 @@ export function StatusView({ jobId }: { jobId: string | null }) {
             <div className="failure">
               <p>Your store details are saved, but nothing is live yet.</p>
               {job.error && <p className="error">{job.error}</p>}
-              <Link className="btn ghost" href="/call">Back to your call</Link>
+              <Link className="btn ghost" href="/">Call again</Link>
             </div>
           )}
           {!isTerminal(job.phase) && <p className="muted">You can leave this page. We&apos;ll email you when the link is verified.</p>}

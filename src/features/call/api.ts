@@ -81,6 +81,8 @@ export function createApiClient(fetcher: Fetcher = (...args) => fetch(...args)) 
     login: (email: string, password: string) => request<{ ok: true }>("POST", "/api/auth/login", { email, password }),
     logout: () => request<{ ok: true }>("POST", "/api/auth/logout", {}),
     getSession: () => request<OwnerSession>("GET", "/api/session"),
+    /** proposed (needs B): no sign-in screen; backend issues an owner session cookie bound to this device. */
+    startOwnerSession: () => request<OwnerSession>("POST", "/api/session", {}),
     createCall: (mode: "create" | "update") => request<{ callId: string }>("POST", "/api/calls", { mode }),
     endCall: (callId: string) => request<unknown>("POST", `/api/calls/${id(callId)}/end`, {}),
     createVoiceSession: (callId: string) => request<VoiceCredential>("POST", "/api/voice/session", { callId }),

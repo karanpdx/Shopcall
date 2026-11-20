@@ -123,3 +123,86 @@ button:focus-visible, .btn:focus-visible, input:focus-visible, label.btn:focus-w
 @media (prefers-reduced-motion: no-preference) {
   .btn, .icon-btn { transition: background-color .15s ease, color .15s ease; }
 }
+
+/* ---- FaceTime-style call (Person A) ---- */
+.ft { position: fixed; inset: 0; background: #0f1f1a; color: #f6f4ec; overflow: hidden; display: flex; flex-direction: column; justify-content: space-between; height: 100dvh; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif; }
+.ft-video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.ft-video.mirror { transform: scaleX(-1); }
+.ft::after { content: ""; position: absolute; inset: 0; pointer-events: none; background: linear-gradient(to bottom, rgba(0,0,0,.45), transparent 22%, transparent 62%, rgba(0,0,0,.6)); }
+.ft > * { position: relative; z-index: 1; }
+.ft-avatar { position: absolute; inset: 0; display: grid; place-items: center; z-index: 0; }
+.ft-avatar-mark { width: 132px; height: 132px; border-radius: 50%; background: #203c33; display: grid; place-items: center; font-size: 64px; font-family: Georgia, serif; color: #f6f4ec; }
+.ft-pulse { position: absolute; width: 132px; height: 132px; border-radius: 50%; border: 2px solid rgba(246,244,236,.5); }
+.ft-pulse.speaking { animation: ft-pulse 1.4s ease-out infinite; }
+@keyframes ft-pulse { from { transform: scale(1); opacity: .9; } to { transform: scale(1.6); opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .ft-pulse.speaking { animation: none; border-color: #f6f4ec; } }
+.ft-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: calc(env(safe-area-inset-top) + 12px) 16px 12px; }
+.ft-back, .ft-bag, .ft-close { width: 44px; height: 44px; border-radius: 50%; display: grid; place-items: center; background: rgba(20,20,20,.35); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); color: inherit; border: 0; cursor: pointer; position: relative; }
+.ft-title { display: grid; justify-items: center; text-align: center; gap: 2px; min-width: 0; }
+.ft-title strong { font-size: 17px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 60vw; }
+.ft-title span { font-size: 13px; opacity: .8; }
+.ft-badge { position: absolute; top: -2px; right: -2px; min-width: 18px; height: 18px; border-radius: 9px; background: #b35832; font-size: 11px; display: grid; place-items: center; padding: 0 4px; }
+.ft-chip { align-self: center; margin-top: 4px; font-size: 13px; padding: 6px 14px; border-radius: 999px; background: rgba(20,20,20,.4); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); }
+.ft-hint { align-self: center; max-width: 320px; text-align: center; font-size: 14px; line-height: 1.5; margin: auto 16px 0; }
+.ft-bottom { display: grid; gap: 14px; padding: 12px 16px calc(env(safe-area-inset-bottom) + 20px); justify-items: center; }
+.ft-strip { list-style: none; padding: 0; margin: 0; display: flex; gap: 8px; overflow-x: auto; max-width: 100%; }
+.ft-strip li button { all: unset; cursor: pointer; display: block; width: 52px; height: 52px; border-radius: 12px; overflow: hidden; border: 2px solid rgba(246,244,236,.85); }
+.ft-strip li.uploading button { opacity: .55; }
+.ft-strip li.failed button { border-color: #e0664a; }
+.ft-strip img { width: 100%; height: 100%; object-fit: cover; }
+.ft-strip button:focus-visible { outline: 3px solid #f6f4ec; outline-offset: 2px; }
+.ft-notice { margin: 0; max-width: 360px; text-align: center; font-size: 13px; line-height: 1.5; padding: 8px 14px; border-radius: 12px; background: rgba(163,52,31,.85); }
+.ft-controls { display: flex; gap: 18px; padding: 14px 20px; border-radius: 40px; background: rgba(30,30,30,.45); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); }
+.ft-round { width: 60px; height: 60px; border-radius: 50%; border: 0; display: grid; place-items: center; cursor: pointer; background: rgba(246,244,236,.22); color: #f6f4ec; }
+.ft-round[aria-pressed="true"] { background: #f6f4ec; color: #0f1f1a; }
+.ft-round.end { background: #e5483a; }
+.ft-round.call { width: 76px; height: 76px; background: #34c759; }
+.ft-round:disabled { opacity: .4; cursor: not-allowed; }
+.ft-round:focus-visible, .ft-back:focus-visible, .ft-bag:focus-visible, .ft-close:focus-visible { outline: 3px solid #f6f4ec; outline-offset: 3px; }
+.ft-start { display: grid; justify-items: center; gap: 8px; font-size: 14px; }
+.ft-fine { margin: 6px 0 0; font-size: 12px; opacity: .75; text-align: center; max-width: 300px; line-height: 1.5; }
+.ft-link { color: inherit; font-size: 14px; text-underline-offset: 4px; }
+.ft-sheet { position: fixed; left: 0; right: 0; bottom: 0; z-index: 5; max-height: 78dvh; overflow-y: auto; background: var(--paper); color: var(--ink); border-radius: 20px 20px 0 0; padding: 8px 16px calc(env(safe-area-inset-bottom) + 16px); display: grid; gap: 12px; box-shadow: 0 -10px 40px rgba(0,0,0,.35); font-family: Arial, Helvetica, sans-serif; }
+.ft-sheet-head { display: flex; justify-content: center; position: relative; min-height: 32px; align-items: center; }
+.ft-grabber { width: 40px; height: 5px; border-radius: 3px; background: var(--line); }
+.ft-sheet .ft-close { position: absolute; right: 0; top: 0; width: 36px; height: 36px; background: var(--line); color: var(--ink); }
+.ft-sheet .tray { border: 0; padding: 0; background: transparent; }
+.ft-publish { width: 100%; }
+@media (min-width: 900px) { .ft-sheet { left: auto; right: 24px; bottom: 24px; width: 400px; border-radius: 20px; max-height: 80dvh; } }
+
+/* ---- Soft, playful skin (camera off = warm and light; camera on = glass over video) ---- */
+.ft.cam-off { background: radial-gradient(120% 80% at 50% 35%, #fff7ea 0%, #f6efe0 45%, #ecdfc8 100%); color: #3a2a20; }
+.ft.cam-off::after { display: none; }
+.ft.cam-off .ft-bag, .ft.cam-off .ft-close { background: rgba(255,255,255,.7); color: #3a2a20; box-shadow: 0 2px 10px rgba(120,80,40,.12); }
+.ft-spacer { width: 44px; height: 44px; }
+.ft-title strong { font-family: ui-rounded, "SF Pro Rounded", -apple-system, system-ui, sans-serif; font-size: 18px; letter-spacing: -.2px; }
+.ft-avatar { pointer-events: none; }
+.orb { pointer-events: auto; position: relative; width: min(58vw, 240px); aspect-ratio: 1; border-radius: 50%; border: 0; padding: 0; cursor: pointer;
+  background: radial-gradient(circle at 32% 28%, #ffe3c4 0%, #ffb38a 32%, #f08a6b 58%, #c9746a 80%, #9b6a7d 100%);
+  box-shadow: 0 30px 60px -20px rgba(201,116,106,.55), inset -14px -18px 40px rgba(110,60,80,.25), inset 10px 12px 30px rgba(255,255,255,.45);
+  display: grid; place-items: center; transition: transform .25s cubic-bezier(.3,1.4,.5,1); }
+.orb:disabled { cursor: default; filter: saturate(.6); }
+.orb:focus-visible { outline: 4px solid #3a2a20; outline-offset: 8px; }
+.orb:active { transform: scale(.94); }
+.orb-face { display: flex; gap: 22%; width: 40%; justify-content: center; }
+.orb-face i { display: block; width: 14%; aspect-ratio: .7; min-width: 12px; border-radius: 50%; background: #3a2a20; opacity: .85; transform-origin: center; }
+.ft-cta { font-family: ui-rounded, "SF Pro Rounded", -apple-system, system-ui, sans-serif; font-size: 22px; font-weight: 600; letter-spacing: -.3px; }
+.ft.cam-off .ft-fine { opacity: .65; }
+.ft.cam-off .ft-notice { background: #fff; color: #a3341f; box-shadow: 0 4px 16px rgba(120,80,40,.15); }
+.ft.cam-off .ft-controls { background: rgba(255,255,255,.72); box-shadow: 0 10px 30px rgba(120,80,40,.15); }
+.ft.cam-off .ft-round { background: #f1e6d4; color: #3a2a20; }
+.ft.cam-off .ft-round[aria-pressed="true"] { background: #3a2a20; color: #fff7ea; }
+.ft.cam-off .ft-round.end { background: #f0604f; color: #fff; }
+.ft-round { width: 58px; height: 58px; border-radius: 22px; }
+.ft-sheet { border-radius: 28px 28px 0 0; font-family: ui-rounded, -apple-system, system-ui, sans-serif; }
+@media (prefers-reduced-motion: no-preference) {
+  .orb.idle { animation: orb-breathe 3.6s ease-in-out infinite; }
+  .orb.listening { animation: orb-breathe 2.4s ease-in-out infinite; }
+  .orb.speaking { animation: orb-talk .5s ease-in-out infinite alternate; }
+  .orb.connecting { animation: orb-wobble 1.1s ease-in-out infinite; }
+  .orb-face i { animation: orb-blink 5s infinite; }
+}
+@keyframes orb-breathe { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.045); } }
+@keyframes orb-talk { from { transform: scale(1, 1); } to { transform: scale(1.06, .95); } }
+@keyframes orb-wobble { 0%, 100% { transform: rotate(-3deg); } 50% { transform: rotate(3deg) scale(1.02); } }
+@keyframes orb-blink { 0%, 92%, 100% { transform: scaleY(1); } 95% { transform: scaleY(.1); } }
