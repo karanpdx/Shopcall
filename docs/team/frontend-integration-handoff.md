@@ -19,7 +19,7 @@ A's orb/camera/product-sheet design is preserved. This change connects its v0 as
 
 ## Non-blocking merchant flow
 
-`End call` always stops audio/camera and records call end. It does not approve or publish. `Finish & review` does that, then opens saved-draft review. Optional story/style questions can be skipped; manual add/edit/photo upload remains available. Starting voice is not required to finish an already saved draft.
+`End call` always stops audio/camera and records call end. It does not approve or publish. `Finish & review` does that, then opens saved-draft review. Optional story/style questions are deferred by the concise agent prompt; manual add/edit/photo upload remains available inside Products. Starting voice is not required to finish an already saved draft.
 
 Intake has **one combined review**, not separate product/business/publication confirmation rounds. `Not yet` rejects the pending combined batch, allowing correction. One consent action covers displayed product/contact publication and queues the real storefront build. Approved working drafts lock their creation fields; later changes use returning-call proposals. No fake publication/progress URL is generated locally. If catalog approval succeeds but the build request fails, UI retains the applied status and retries the build without re-creating products or re-applying catalog changes. An uncertain apply response is reconciled against the persisted batch status first.
 
@@ -31,7 +31,7 @@ Final business name/contact can be entered in review and included in the same co
 
 ## Media-control regression fix
 
-User's video/control bug reproduced because `.ft > *` overrode `.ft-video` to `position: relative`: full-height video entered flex layout and pushed function controls outside the clipped call screen. More-specific layer rules now keep video absolute with no pointer interception, top controls and footer overlays positioned independently, and compact footer controls at short/landscape viewports. Idle microphone icon now starts voice rather than being disabled; explicit text Start voice call remains reachable with camera on.
+User's video/control bug reproduced because `.ft > *` overrode `.ft-video` to `position: relative`: full-height video entered flex layout and pushed function controls outside the clipped call screen. More-specific layer rules now keep video absolute with no pointer interception, top controls and footer overlays positioned independently, and compact footer controls at short/landscape viewports. One explicit Start call button remains reachable with camera on or off. The orb is decorative, manual product entry lives only inside Products, and microphone mute is disabled until voice connects.
 
 Four additional opt-in browser regressions use synthetic canvas video and mocked API responses, with Chrome fake-device flags as a second guard against real device use. They check elementFromPoint hit-testing at 390×844, 844×390 and 320×480, actual camera-off track stopping and preview removal, and meaningful denied-microphone guidance before any provider-session request. They were observed red before the fix and green afterward. Run against an already running local app:
 
@@ -44,3 +44,7 @@ Without this explicit URL, browser tests skip rather than starting an app or req
 Parent is performing real local browser checks and the full repository build. No live microphone conversation, real camera capture, successful Replit publication or email delivery is claimed by these UI changes. Email copy is conditional and failure copy does not imply a prior working storefront disappeared.
 
 Known operational gates remain backend configuration, demo-owner credentials, microphone permission on the user's device, private ElevenLabs agent, durable database/storage, authenticated Replit account/tool flow and actual published browser verification. Local status page remains available if email sender is not configured.
+
+## Button meanings
+
+**Start call** starts the microphone conversation; the orb is decorative. During a connected call, **Microphone** mutes or unmutes, **Camera** turns only video on or off, and **End call** stops the conversation and saves drafts. **Finish & review** ends the call and opens one combined approval before publication. The **Products** bag opens captured listings; **Add manually** is a fallback inside that sheet when voice capture needs help. Camera and End remain reachable over video.

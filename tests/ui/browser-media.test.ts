@@ -70,9 +70,12 @@ for (const viewport of [{ width: 390, height: 844 }, { width: 844, height: 390 }
       await page.evaluate(installSyntheticMedia, { deniedAudio: false });
       await page.getByRole("button", { name: "Turn camera on", exact: true }).click();
       await page.getByRole("button", { name: "Turn camera off", exact: true }).waitFor();
+      assert.equal(await page.getByRole("button", { name: "Start call", exact: true }).count(), 1);
+      assert.equal(await page.getByRole("button", { name: "Add product", exact: true }).count(), 0);
+      assert.equal(await page.getByRole("button", { name: "Add manually", exact: true }).count(), 0);
       const position = await page.locator("video.ft-video").evaluate(video => getComputedStyle(video).position);
       assert.equal(position, "absolute", "Camera must not enter the flex layout and push controls offscreen.");
-      for (const label of ["Turn camera off", "End call", "Start voice call"]) {
+      for (const label of ["Turn camera off", "End call", "Start call"]) {
         const result = await hitTest(page, label);
         assert.equal(result.inViewport && result.clickable, true, `${label} inaccessible: ${JSON.stringify(result)}`);
       }
@@ -92,11 +95,12 @@ test("microphone start reports denied permission without creating a provider ses
     let voiceRequests = 0;
     page.on("request", request => { if (new URL(request.url()).pathname === "/api/voice/session") voiceRequests++; });
     await page.goto(baseUrl!);
-    await page.getByRole("button", { name: "Start voice call", exact: true }).last().waitFor();
+    await page.getByRole("button", { name: "Start call", exact: true }).last().waitFor();
     await page.evaluate(installSyntheticMedia, { deniedAudio: true });
-    const microphone = page.getByRole("button", { name: "Start voice call with microphone", exact: true });
-    assert.equal(await microphone.isEnabled(), true);
-    await microphone.click();
+    const microphone = page.getByRole("button", { name: "Microphone (start a call first)", exact: true });
+    assert.equal(await microphone.isDisabled(), true);
+    assert.equal(await page.getByRole("button", { name: "Start call", exact: true }).count(), 1);
+    await page.getByRole("button", { name: "Start call", exact: true }).click();
     await page.getByRole("alert").filter({ hasText: /microphone.*blocked|microphone.*permission/i }).waitFor({ timeout: 10_000 });
     assert.equal(await page.evaluate(() => window.__shopcallMediaTest.audioRequests), 1);
     assert.equal(voiceRequests, 0, "Denied microphone should be explained before consuming a voice session.");
