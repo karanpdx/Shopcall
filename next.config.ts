@@ -3,6 +3,7 @@ import type { NextConfig } from "next";
 const config: NextConfig = {
   serverExternalPackages: ["better-sqlite3"],
   poweredByHeader: false,
+  allowedDevOrigins: process.env.PHONE_DEMO_ORIGIN ? [new URL(process.env.PHONE_DEMO_ORIGIN).hostname] : [],
   async rewrites() {
     const configured = process.env.SHOPCALL_API_PROXY_ORIGIN;
     if (!configured) return [];

@@ -66,6 +66,7 @@ export class PlaywrightPreviewInspector implements PreviewInspector {
     const browser = await this.launch();
     try {
       const context = await browser.newContext({ serviceWorkers: "block", acceptDownloads: false });
+      await context.addInitScript("globalThis.__name ??= (target, name) => Object.defineProperty(target, 'name', { value: name, configurable: true });");
       await context.routeWebSocket("**/*", socket => socket.close());
       await context.route("**/*", async route => {
         const target = new URL(route.request().url());

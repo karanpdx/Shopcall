@@ -7,3 +7,5 @@ coverage
 tests
 scripts
 src/app/api
+.claude
+.codex

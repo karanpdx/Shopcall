@@ -8,4 +8,5 @@ coverage/
 .DS_Store
 *.tsbuildinfo
 .vercel/
+.claude/worktrees/
 .vercel

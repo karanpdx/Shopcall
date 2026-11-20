@@ -50,6 +50,7 @@ export class PlaywrightStorefrontCheck implements AnonymousBrowserCheck {
     const browser = await this.launch();
     try {
       const context = await browser.newContext({ serviceWorkers: "block", acceptDownloads: false, viewport: { width: 390, height: 844 } });
+      await context.addInitScript("globalThis.__name ??= (target, name) => Object.defineProperty(target, 'name', { value: name, configurable: true });");
       const errors: string[] = [];
       await context.routeWebSocket("**/*", socket => socket.close());
       await context.route("**/*", async route => {

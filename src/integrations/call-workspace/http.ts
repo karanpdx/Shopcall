@@ -8,6 +8,7 @@ export function requireWorkspaceOwner(req: Request): Owner {
     const origin = req.headers.get("origin");
     const trustedOrigins = new Set([new URL(req.url).origin]);
     if (process.env.APP_BASE_URL) trustedOrigins.add(new URL(process.env.APP_BASE_URL).origin);
+    if (process.env.PHONE_DEMO_ORIGIN) trustedOrigins.add(new URL(process.env.PHONE_DEMO_ORIGIN).origin);
     if (!origin || !trustedOrigins.has(origin) || req.headers.get("sec-fetch-site") === "cross-site") fail(403, "FORBIDDEN", "Same-origin browser request required.");
   }
   return owner;

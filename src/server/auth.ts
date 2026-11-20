@@ -46,6 +46,7 @@ export function assertSameOrigin(req: Request) {
   const host = req.headers.get("x-forwarded-host") ?? req.headers.get("host");
   if (host) allowed.add(`${req.headers.get("x-forwarded-proto") ?? new URL(req.url).protocol.replace(":", "")}://${host}`);
   if (process.env.APP_BASE_URL) allowed.add(new URL(process.env.APP_BASE_URL).origin);
+  if (process.env.PHONE_DEMO_ORIGIN) allowed.add(new URL(process.env.PHONE_DEMO_ORIGIN).origin);
   if (!allowed.has(origin)) fail(403, "FORBIDDEN", "Cross-origin request rejected.");
 }
 
