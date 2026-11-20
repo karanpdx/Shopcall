@@ -24,10 +24,10 @@ export function draftReadiness(draft: WorkingProductDraft) {
 }
 
 export class CallWorkspaceService {
-  constructor(readonly store: CallWorkspaceStore, private readonly catalog: WorkspaceCatalogRepository) {}
+  constructor(readonly store: CallWorkspaceStore, private readonly catalog: WorkspaceCatalogRepository, private readonly media?: { enqueueForDraft(owner: WorkspaceOwner, callId: string, draftId: string): unknown; getForDraft(owner: WorkspaceOwner, callId: string, draftId: string): unknown }) {}
 
   async current(owner: WorkspaceOwner, callId: string) {
-    return { call: this.store.getCall(owner, callId), drafts: this.store.listDrafts(owner, callId).map(draft => ({ ...draft, ...draftReadiness(draft), imageUrl: draft.imageAssetId ? assetUrl(draft.imageAssetId) : null })) };
+    return { call: this.store.getCall(owner, callId), drafts: this.store.listDrafts(owner, callId).map(draft => ({ ...draft, ...draftReadiness(draft), imageUrl: draft.imageAssetId ? assetUrl(draft.imageAssetId) : null, ...(this.media ? { media: this.media.getForDraft(owner, callId, draft.id) } : {}) })) };
   }
 
   async editable(owner: WorkspaceOwner, callId: string, draftId: string) {
@@ -49,7 +49,10 @@ export class CallWorkspaceService {
     if (asset.businessId !== owner.businessId) fail(404, "NOT_FOUND", "Image asset not found for this business.");
     await this.editable(owner, callId, draftId);
     const draft = this.store.attachImage(owner, callId, draftId, asset.id, capturedAt);
-    return { captureId: asset.id, productDraftId: draftId, thumbnailUrl: asset.url, draft, ...draftReadiness(draft), saved: true, published: false };
+    // Queue immediately on the server-confirmed capture path, including automatic
+    // client-tool uploads. It does not hold mic/camera or wait for model processing.
+    const media = this.media?.enqueueForDraft(owner, callId, draftId);
+    return { captureId: asset.id, productDraftId: draftId, thumbnailUrl: asset.url, draft, ...draftReadiness(draft), saved: true, published: false, ...(media ? { media } : {}) };
   }
 
   async proposeProduct(owner: WorkspaceOwner, callId: string, draftId: string) {

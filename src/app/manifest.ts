@@ -2,8 +2,8 @@ import type { MetadataRoute } from "next";
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: "Shopcall",
-    short_name: "Shopcall",
+    name: "lit",
+    short_name: "lit",
     description: "Call your storefront into existence.",
     start_url: "/",
     display: "standalone",

@@ -145,6 +145,28 @@ export class CallWorkspaceStore {
     }).immediate();
   }
 
+  /** Explicit owner choice only; no provider result can call this without a UI revision. */
+  applyMediaSelection(owner: WorkspaceOwner, callId: string, draftId: string, input: {
+    expectedRevision: number; originalAssetId: string; enhancedAssetId: string | null; capturedAt: string;
+    title?: string; description?: string; expectedTitle?: string | null; expectedDescription?: string | null; selectedAssetId?: string;
+  }): WorkingProductDraft {
+    return this.db.transaction(() => {
+      const current = this.getDraft(owner, callId, draftId);
+      if (current.revision !== input.expectedRevision) fail(409, "STALE_REVISION", "Product changed since the media result was reviewed. Reload before choosing suggestions.");
+      if (current.proposalRevision !== null) fail(409, "CONFLICT", "Review or reject the pending product proposal before choosing media.");
+      if (current.capturedAt !== input.capturedAt || !(current.imageAssetId === input.originalAssetId || input.enhancedAssetId !== null && current.imageAssetId === input.enhancedAssetId)) fail(409, "STALE_REVISION", "Media belongs to an older capture.");
+      if (input.title !== undefined && (current.fields.title ?? null) !== input.expectedTitle) fail(409, "STALE_REVISION", "Owner changed the product name after this photo. Keep that correction or review a new suggestion.");
+      if (input.description !== undefined && (current.fields.description ?? null) !== input.expectedDescription) fail(409, "STALE_REVISION", "Owner changed the description after this photo. Keep that correction.");
+      const fields = draftPatch.parse({ ...current.fields, ...(input.title !== undefined ? { title: input.title } : {}), ...(input.description !== undefined ? { description: input.description } : {}) });
+      const selected = input.selectedAssetId ?? current.imageAssetId;
+      if (selected !== input.originalAssetId && selected !== input.enhancedAssetId) fail(400, "INVALID_INPUT", "Unknown product image variant.");
+      if (!this.db.prepare("SELECT id FROM assets WHERE id=? AND business_id=?").get(selected, owner.businessId)) fail(404, "NOT_FOUND", "Selected image is not owned by this business.");
+      if (JSON.stringify(fields) === JSON.stringify(current.fields) && selected === current.imageAssetId) return current;
+      this.db.prepare("UPDATE shopcall_working_drafts_v1 SET fields=?,imageAssetId=?,revision=revision+1,updatedAt=? WHERE id=? AND revision=?").run(JSON.stringify(fields), selected, timestamp(), draftId, input.expectedRevision);
+      return this.getDraft(owner, callId, draftId);
+    }).immediate();
+  }
+
   linkProposal(owner: WorkspaceOwner, callId: string, draftId: string, draftRevision: number, proposalId: string) {
     z.uuid().parse(proposalId);
     const current = this.getDraft(owner, callId, draftId);

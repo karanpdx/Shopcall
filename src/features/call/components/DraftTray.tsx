@@ -3,6 +3,7 @@ import { useId, useState } from "react";
 import { Camera, RotateCcw, Trash2, Upload } from "lucide-react";
 import type { DraftPatch } from "../api";
 import { formatMoney, missingFields, parsePriceToMinor, type DraftView, type DraftsState } from "../drafts";
+import { DraftMediaPanel } from "./DraftMediaPanel";
 
 type Props = {
   state: DraftsState;
@@ -12,6 +13,8 @@ type Props = {
   onUpload: (draftId: string, file: File) => void;
   onRemoveCapture: (draftId: string, localId: string) => void;
   onSave: (draftId: string, patch: DraftPatch) => Promise<string | null>;
+  callId: string | null;
+  onMediaChanged: () => Promise<void>;
 };
 
 const LABELS = { name: "name", price: "price", stock: "stock", photo: "photo" } as const;
@@ -37,7 +40,7 @@ export function DraftTray({ state, ...handlers }: Props) {
   );
 }
 
-function DraftCard({ draft, active, cameraOn, onSelect, onCapture, onUpload, onRemoveCapture, onSave }: Omit<Props, "state"> & { draft: DraftView; active: boolean }) {
+function DraftCard({ draft, active, cameraOn, onSelect, onCapture, onUpload, onRemoveCapture, onSave, callId, onMediaChanged }: Omit<Props, "state"> & { draft: DraftView; active: boolean }) {
   const uid = useId();
   const [editing, setEditing] = useState(false);
   const missing = missingFields(draft);
@@ -70,6 +73,7 @@ function DraftCard({ draft, active, cameraOn, onSelect, onCapture, onUpload, onR
       {draft.captures.some(c => c.status === "failed") && (
         <p className="error" role="status">{draft.captures.find(c => c.status === "failed")?.error ?? "A photo didn't save."} Retake or upload instead.</p>
       )}
+      {callId && draft.imageAssetId && <DraftMediaPanel callId={callId} draft={draft} onChanged={onMediaChanged} />}
 
       <div className="draft-actions">
         <button type="button" className="btn ghost" disabled={!cameraOn || draft.approved} onClick={() => onCapture(draft.id)} title={cameraOn ? undefined : "Turn your camera on to take a photo"}>

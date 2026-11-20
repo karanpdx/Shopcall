@@ -1,6 +1,7 @@
 import { mkdir, readFile, writeFile, rename } from "node:fs/promises";
 import { join } from "node:path";
 import { z } from "zod";
+import { chromium } from "playwright-core";
 import { localReplitConnection } from "../src/integrations/replit/local";
 import { ReplitMcpClient } from "../src/integrations/replit/client";
 
@@ -61,11 +62,21 @@ try {
       const url = new URL(state.publicUrl);
       if (url.protocol !== "https:" || !url.hostname.endsWith(".replit.app") || url.username || url.password || url.search || url.hash) throw new Error("Unexpected probe deployment origin.");
       const page = await fetch(url, { credentials: "omit", redirect: "manual", cache: "no-store", signal: AbortSignal.timeout(20_000) });
-      const html = await page.text();
-      if (!page.ok || !html.includes("shopcall-probe-20261120")) throw new Error("Anonymous probe page marker missing.");
+      if (!page.ok) throw new Error("Anonymous probe page failed.");
+      // Replit's React stack renders the page in the browser, so raw HTML
+      // cannot establish whether the synthetic marker is visible.
+      const browser = await chromium.launch({ executablePath: process.env.CHROME_EXECUTABLE_PATH, headless: true });
+      try {
+        const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
+        const rendered = await context.newPage();
+        await rendered.goto(url.href, { waitUntil: "networkidle", timeout: 30_000 });
+        await rendered.getByText("shopcall-probe-20261120", { exact: true }).first().waitFor({ state: "visible", timeout: 15_000 });
+        await context.close();
+      } finally { await browser.close(); }
       const check = await fetch(new URL("/api/probe", url), { credentials: "omit", redirect: "manual", cache: "no-store", signal: AbortSignal.timeout(20_000) });
-      const data = z.object({ kind: z.literal("shopcall-probe-20261120"), serverTime: z.string() }).parse(await check.json());
+      const data = z.object({ kind: z.literal("shopcall-probe-20261120"), serverTime: z.iso.datetime() }).parse(await check.json());
       if (!check.ok) throw new Error("Probe endpoint failed.");
+      if (Math.abs(Date.now() - Date.parse(data.serverTime)) > 60_000) throw new Error("Probe endpoint timestamp is stale.");
       await persist({ ...state, state: "verified", verifiedAt: new Date().toISOString() });
       console.log(JSON.stringify({ verified: true, publicUrl: url.href, kind: data.kind, syntheticProbeOnly: true }));
     }

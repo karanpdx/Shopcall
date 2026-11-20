@@ -4,6 +4,7 @@ import type { BuildJob } from "../../contracts/integrations";
 import type { WorkingCall, WorkingProductDraft } from "../../integrations/call-workspace/store";
 import type { CatalogBatch } from "../../integrations/catalog-batches/types";
 import type { ClientToolName } from "../../integrations/elevenlabs/tools";
+import type { MediaChoice, MediaJobView } from "./media";
 
 export type ApiError = Extract<ApiResult<never>, { ok: false }>["error"];
 export type OwnerSession = Session & { business: Session["business"] & { contactEmail: string | null }; catalogRevision: number; latestJobId?: string | null };
@@ -62,7 +63,7 @@ export function createApiClient(fetcher: typeof fetch = (...args) => fetch(...ar
     else if (body !== undefined) { init.body = JSON.stringify(body); headers.set("content-type", "application/json"); }
     let response: Response;
     try { response = await fetcher(path, init); }
-    catch { return { ok: false, error: { code: "PROVIDER_ERROR", message: "Couldn't reach Shopcall. Your saved details are safe; retry when connected." } }; }
+    catch { return { ok: false, error: { code: "PROVIDER_ERROR", message: "Couldn't reach lit. Your saved details are safe; retry when connected." } }; }
     let result: unknown;
     try { result = await response.json(); } catch { /* Bad/missing server response is never success. */ }
     if (isResult(result) && (!result.ok || response.ok)) return result as ApiResult<T>;
@@ -100,6 +101,8 @@ export function createApiClient(fetcher: typeof fetch = (...args) => fetch(...ar
       return response.ok ? { ok: true, data: { ...response.data, thumbnailUrl: ownerAssetUrl(response.data.captureId) } } : response;
     },
     proposeProduct: (callId: string, draftId: string) => request<{ proposal: CatalogBatch }>("POST", `/api/calls/${id(callId)}/drafts/${id(draftId)}/proposal`, {}),
+    getDraftMedia: (callId: string, draftId: string) => request<{ job: MediaJobView | null }>("GET", `/api/calls/${id(callId)}/drafts/${id(draftId)}/media`),
+    chooseDraftMedia: (callId: string, draftId: string, choice: MediaChoice) => request<unknown>("POST", `/api/calls/${id(callId)}/drafts/${id(draftId)}/media/choice`, choice),
     proposeCallReview: (callId: string, input: { name: string; contactEmail: string; idempotencyKey: string }) => request<CombinedCallReview>("POST", `/api/calls/${id(callId)}/review`, input),
     proposeCatalogChanges: (input: { callId: string; expectedCatalogRevision: number; idempotencyKey: string; changes: ProductChange[] }) => request<CatalogBatch>("POST", "/api/catalog/proposals", input),
     getCatalogProposal: (proposalId: string) => request<CatalogBatch>("GET", `/api/catalog/proposals/${id(proposalId)}`),

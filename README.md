@@ -4,8 +4,9 @@ Show your products. Tell your story. Get a Replit-generated storefront you can u
 
 ## Current status
 
-This is a **collaboration scaffold**, not a working end-to-end demo. It includes a responsive landing page, health route, shared Zod contracts, server-side ElevenLabs SDK factory, read-only connection check, and three contributor work areas. Voice calls, camera capture, authentication, catalog persistence, Replit OAuth/build/publish, URL verification, and email are still to implement. Nothing is deployed or published.
+A/B/C are integrated on `feat/integrations`. Browser calling, authenticated persistent catalog, draft-bound still capture, combined owner review and the durable Replit publication worker are implemented. The simpler phone frontend is deployed at **https://shopcall-demo.vercel.app**. The API/storage/worker still run on the demo Mac behind temporary HTTPS tunnels; keep the Mac and processes running. See [demo topology](docs/team/local-public-demo.md).
 
+Provider evidence (November 20, 2026): a short real ElevenLabs session through the deployed frontend returned greeting audio with a synthetic microphone. A real, explicitly synthetic Replit probe was automatically created and published, then independently verified in an anonymous mobile browser and through its fresh server endpoint. Neither establishes a complete real merchant demo. Physical-phone audio, three real product photos, merchant publication and same-URL voice updates still need end-to-end acceptance. Photo analysis/enhancement is being integrated; saved photos alone are not evidence of generation. Real email is not configured.
 Confirmed scope: working hackathon demo, one authenticated demo merchant, **fully automatic Replit app creation and publication**, and subsequent camera-off price/stock updates at the **same public URL**. No template fallback. See [decisions](docs/decisions.md) and [requirements](docs/requirements.md).
 
 ## Local setup
@@ -20,9 +21,9 @@ cp .env.example .env.local
 npm run dev
 ```
 
-Open http://localhost:3000. `GET /api/health` explicitly reports scaffold status. `.env.local` is ignored; never commit or paste keys. Only the ElevenLabs key is needed for the connection check; the landing page needs no credentials.
+Open http://localhost:3000. `GET /api/health` reports service health. `.env.local` is ignored; never commit or paste keys. Only the ElevenLabs key is needed for the connection check; the landing page needs no credentials.
 
-For ElevenLabs onboarding, run `npx -y @elevenlabs/cli@latest onboard init` and follow its output. `npm run agent:setup` currently checks read-only agent-list access; it does **not** create or modify an agent. API access is not proof of a working browser call.
+For ElevenLabs onboarding, run `npx -y @elevenlabs/cli@latest onboard init` and follow its output. `npm run agent:setup` provisions or reuses a dedicated private agent; `npm run agent:sync` updates its managed prompt and tools. API access is not proof of a working browser call.
 
 ## Three-person work split
 
@@ -32,7 +33,7 @@ For ElevenLabs onboarding, run `npx -y @elevenlabs/cli@latest onboard init` and 
 | B — Catalog/backend | `src/server/**`, `src/app/api/**`, `migrations/**` | `feat/catalog-backend` | [Person B](docs/team/person-b-catalog.md) |
 | C — Integrations/jobs | `src/integrations/**`, `scripts/**` | `feat/integrations` | [Person C](docs/team/person-c-integrations.md) |
 
-Choose which person owns which area before coding. Names are unassigned. [Coordination and shared-file rules](docs/team/README.md) explain how to avoid overlap. [API contract](docs/api-contract.md) defines the handoffs. Contracts describe intended interfaces, not working routes.
+Choose which person owns which area before coding. Names are unassigned. [Coordination and shared-file rules](docs/team/README.md) explain how to avoid overlap. [API contract](docs/api-contract.md) defines the handoffs. Use `src/contracts/api.ts` for the integrated backend and the handoff docs for call workspace and publication interfaces.
 
 ## Checks
 
@@ -42,10 +43,20 @@ npm run typecheck
 npm run build
 ```
 
-`npm run worker` intentionally exits with a not-implemented error. Person C replaces it with a durable publication worker. No fake build progress or successful publication is included.
+Run `npm run demo:setup` to fill missing local defaults and write generated credentials to private ignored `.shopcall/demo-login.txt`. Run `npm run replit:connect` for application-owned OAuth, then `npm run replit:check` to discover actual tools. Configure public HTTPS catalog origin, persistent storage, observed Replit response profile and Chrome before starting `npm run worker -- --loop`.
 
-Scaffold validation (November 20, 2026): 3 contract tests, TypeScript, and production build passed. ElevenLabs onboarding and read-only SDK agent-list request passed locally (zero agents visible); no agent was provisioned, no speech was generated, and no browser conversation was tested. Other contributors must onboard their own local credentials.
+Phone: open the frontend directly in Safari (iPhone) or Chrome (Android), sign in, tap **Start call**, allow microphone access and turn on camera when showing a product. Give name, USD price and quantity together. **Products** shows saved drafts. **Finish & review** ends audio and prepares the final listing review. Only explicit owner confirmation applies catalog changes and queues publication. Wait for real observed status; do not submit duplicate builds.
 
+Additional opt-in checks:
+
+```sh
+UI_BROWSER_TEST_URL=http://localhost:3000 node --import tsx --test tests/ui/browser-media.test.ts
+npm run demo:smoke
+node --env-file=.env.local --import tsx scripts/verify-browser-voice.ts --live
+npm run replit:probe -- verify
+```
+
+The voice check starts one short real session with synthetic microphone input and logs connection/audio-receipt booleans only. The Replit check verifies the existing synthetic probe; never recreate an app to retry an unknown create/publish outcome.
 ## Integration gates
 
 1. Replit: application-owned OAuth → actual tool discovery → create → observable build readiness → publish → anonymously verify public URL and current catalog. Codex-side authentication is separate from backend credentials.

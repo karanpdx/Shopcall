@@ -1,6 +1,6 @@
 /** Probe only after an explicit Start click; release temporary audio before SDK owns its input. */
 export async function checkMicrophone(devices: Pick<MediaDevices, "getUserMedia"> | undefined): Promise<string | null> {
-  if (!devices?.getUserMedia) return "Microphone access is unavailable. Open Shopcall in a secure browser tab and connect a microphone.";
+  if (!devices?.getUserMedia) return "Microphone access is unavailable. Open lit in a secure browser tab and connect a microphone.";
   try {
     const probe = await devices.getUserMedia({ audio: true, video: false });
     probe.getTracks().forEach(track => track.stop());
