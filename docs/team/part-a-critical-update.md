@@ -39,3 +39,8 @@ User specifically wants useful information without excessive questions or keepin
 - A roughly two-minute intake is a demo design target, not a hard cutoff or measured claim. Offer a minimal first version and a visible exit; don't interrupt volunteered useful information to enforce a timer.
 
 Call-policy helper and example scripts are being developed separately within C. Integrate the final `call-policy-handoff.md` when available; do not independently fork the agent's prompt into frontend code.
+# Current integration checkpoint — November 20, 2026
+
+Live frontend is branded **lit** at https://shopcall-demo.vercel.app. A/B/C are integrated on `feat/integrations`. Main call now shows actual photo-generation progress and candidate preview, automatic capture uses a shared draft-bound guard, camera state reaches the agent, and Finish opens editable listing previews before the combined proposal freezes. Owner chooses generated copy/photo; nothing is auto-approved. Later new-product approval reuses a verified storefront without another build. Sign out clears old account state and discards late tool responses.
+
+Seven browser fixture scenarios passed against the production frontend. Original merchant publication passed real anonymous browser/catalog verification at https://detailed-difficult-boastmachine.replit.app/. A latest-policy fresh spoken three-item rehearsal and camera-off maintenance run remain manual acceptance. The backend still runs on the demo Mac through temporary HTTPS tunnels. Details: `live-call-fixes.md`, `product-media-handoff.md`, and current README.

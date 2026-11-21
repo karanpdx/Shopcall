@@ -27,3 +27,10 @@ The harness runs inside the product. After owner approval, ordered specialist ta
 Keep shared v0 contracts stable while C lands provider modules. Map detailed run states to explicit owner-safe status DTOs; don't overload `ready` to mean submitted. C will publish exact exports and required env names in final handoff. No secrets in docs, logs or browser payloads.
 
 Recommended parallel priority: auth + drafts/catalog + public read endpoint first; then wire voice/session and OAuth/provider routes from C's handoff. Treat live deployment and credential verification as separate evidence gates.
+# Current integration checkpoint — November 20, 2026
+
+The integrated worker has automatically created, published and independently verified the original merchant storefront. B's job is completed/completed with the verified public URL. C now consumes the actual v1 catalog envelope, validates the approved public slug, normalizes metadata, and compares current prices/stock/images before publication is exposed.
+
+User explicitly requested a second fixed demo login for an empty catalog. Optional `DEMO_SECOND_OWNER_EMAIL/PASSWORD/BUSINESS_NAME` now provisions a separate owner/business through the existing login flow; authorization isolation tests prove it cannot read the first account's products. This adds no public signup. C's nonproduction local Replit alias recognizes only configured demo identities. Original account/data remain intact.
+
+New product drafts/photo processing continue independently of existing builds. Generated text/image choices require owner selection before freezing the combined batch. Calls now distinguish publication-review handles, catalog-batch IDs and build-job IDs; known preview-handle confusion is corrected without approving or publishing. See `live-call-fixes.md` and `product-media-handoff.md` for exact behavior and validation boundaries.
