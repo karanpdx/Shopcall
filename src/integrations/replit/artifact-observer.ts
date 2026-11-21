@@ -13,11 +13,23 @@ type SourceSelection = {
   tolerateReadErrors?: boolean;
   enough?(inventory: SourceInventory): boolean;
 };
-export type ArtifactReviewLimits = { maxDirectories: number; maxFiles: number; maxFileBytes: number; maxTotalBytes: number; maxDepth: number };
-const defaults: ArtifactReviewLimits = { maxDirectories: 80, maxFiles: 180, maxFileBytes: 200_000, maxTotalBytes: 3_000_000, maxDepth: 8 };
-const ignoredDirectory = /^(?:node_modules|dist|build|coverage|vendor|mockup-sandbox)$/i;
+export type ArtifactReviewLimits = { maxDirectories: number; maxFiles: number; maxFileBytes: number; maxTotalBytes: number; maxDepth: number; maxElapsedMs?: number };
+const defaults: ArtifactReviewLimits = { maxDirectories: 80, maxFiles: 180, maxFileBytes: 200_000, maxTotalBytes: 3_000_000, maxDepth: 8, maxElapsedMs: 90_000 };
+const ignoredDirectory = /^(?:node_modules|dist|build|coverage|vendor|mockup-sandbox|tests|__tests__|__mocks__)$/i;
 const sourceExtension = /\.(?:[cm]?[jt]sx?|css|html|json)$/i;
 const privateName = /(?:^|\.)(?:env|pem|key|p12|pfx|sqlite|db)(?:\.|$)|^(?:credentials|secrets|tokens?)(?:\.|$)/i;
+// Queue ticks construct fresh provider runtimes, so this bound must outlive an observer
+// instance. Process restarts still retain the workflow's original durable wait deadline.
+const transientReadFailures = new Map<string, number>();
+function recordReadFailure(key: string) {
+  if (!transientReadFailures.has(key) && transientReadFailures.size >= 512) {
+    const oldest = transientReadFailures.keys().next().value;
+    if (oldest !== undefined) transientReadFailures.delete(oldest);
+  }
+  const failures = (transientReadFailures.get(key) ?? 0) + 1;
+  transientReadFailures.set(key, failures);
+  return failures;
+}
 
 function textContent(result: ReplitToolResult) {
   if (result.isError || !result.content.length || result.content.some(item => item.type !== "text" || typeof item.text !== "string")) throw new Error("ARTIFACT_RESPONSE_UNVERIFIED");
@@ -26,6 +38,18 @@ function textContent(result: ReplitToolResult) {
 
 /** Actual provider listing/read responses are text content blocks, not a fabricated JSON schema. */
 export async function readSourceInventory(client: ReplitArtifactPort, replId: string, limits: ArtifactReviewLimits = defaults, selection?: SourceSelection): Promise<SourceInventory> {
+  const deadline = Date.now() + (limits.maxElapsedMs ?? 90_000);
+  let timeLimitReached = false;
+  async function bounded<T>(read: () => Promise<T>): Promise<T> {
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) { timeLimitReached = true; throw new Error("ARTIFACT_TIME_LIMIT"); }
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await Promise.race([read(), new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => { timeLimitReached = true; reject(new Error("ARTIFACT_TIME_LIMIT")); }, remaining);
+      })]);
+    } finally { if (timer) clearTimeout(timer); }
+  }
   const directories: Array<{ path?: string; depth: number }> = [{ depth: 0 }];
   const files: string[] = [];
   const omittedPaths: string[] = [];
@@ -34,10 +58,11 @@ export async function readSourceInventory(client: ReplitArtifactPort, replId: st
     const directory = directories.shift()!;
     if (++listed > limits.maxDirectories || directory.depth > limits.maxDepth) throw new Error("ARTIFACT_REVIEW_LIMIT");
     let response: string;
-    try { response = textContent(await client.listAppFiles(replId, directory.path)); }
+    try { response = textContent(await bounded(() => client.listAppFiles(replId, directory.path))); }
     catch (error) {
       if (!selection?.tolerateReadErrors) throw error;
       omittedPaths.push(`directory:${directory.path ?? "root"}`);
+      if (timeLimitReached) { omittedPaths.push("time-budget:directory-inventory"); break; }
       continue;
     }
     if (Buffer.byteLength(response) > 100_000) throw new Error("ARTIFACT_LIST_LIMIT");
@@ -61,12 +86,14 @@ export async function readSourceInventory(client: ReplitArtifactPort, replId: st
   // reads. Serialize requests; safe read retries remain bounded in the MCP client.
   let attempted = 0;
   for (const path of files) {
+    if (timeLimitReached) { omittedPaths.push("time-budget:remaining-runtime-source"); break; }
     attempted++;
     let artifact: SourceArtifact;
-    try { artifact = { path, source: textContent(await client.readAppFile(replId, path)) }; }
+    try { artifact = { path, source: textContent(await bounded(() => client.readAppFile(replId, path))) }; }
     catch (error) {
       if (!selection?.tolerateReadErrors) throw error;
       omittedPaths.push(path);
+      if (timeLimitReached) { omittedPaths.push("time-budget:remaining-runtime-source"); break; }
       continue;
     }
     const size = Buffer.byteLength(artifact.source);
@@ -102,7 +129,6 @@ export function inspectStaticArtifacts(inventory: SourceInventory, publicCatalog
 
 /** Provider-idle plus independently retrieved source preflight, limited to pre-publication tasks. */
 export class ReplitArtifactTaskObserver {
-  private readonly readFailures = new Map<string, number>();
   constructor(private readonly client: ReplitArtifactPort & Pick<ReplitMcpClient, "askBuildReadiness">, private readonly now = () => new Date(), private readonly limits = defaults) {}
   async observe(run: BuildRun, task: StorefrontTask): Promise<TaskObservation> {
     assertPlanIntegrity(run.plan);
@@ -117,7 +143,7 @@ export class ReplitArtifactTaskObserver {
       const key = `${run.id}/${task.id}`;
       const selection: SourceSelection = {
         enter: path => !/(?:^|\/)components\/ui(?:\/|$)/i.test(path) && (catalog || !/(?:^|\/)(?:api|api-server|server|lib|hooks)(?:\/|$)/i.test(path)),
-        read: path => catalog ? /\.[cm]?[jt]sx?$/i.test(path) : /\.(?:tsx|jsx|css|html)$/i.test(path),
+        read: path => !/\.(?:test|spec|stories)\.[cm]?[jt]sx?$/i.test(path) && !/\.d\.[cm]?ts$/i.test(path) && (catalog ? /\.[cm]?[jt]sx?$/i.test(path) : /\.(?:tsx|jsx|css|html)$/i.test(path)),
         tolerateReadErrors: true,
         // Positive design/frontend artifact references can be established without reading unrelated
         // boilerplate. Catalog absence claims require the complete selected runtime source inventory.
@@ -127,13 +153,12 @@ export class ReplitArtifactTaskObserver {
       const checks = inspectStaticArtifacts(inventory, run.plan.brief.publicCatalogUrl, run.plan.id);
       if (!task.acceptanceCriteria.every(check => checks.includes(check))) {
         if (inventory.omittedPaths?.length) {
-          const failures = (this.readFailures.get(key) ?? 0) + 1;
-          this.readFailures.set(key, failures);
+          const failures = recordReadFailure(key);
           return failures < 3 ? { state: "pending" } : { state: "blocked", code: "SOURCE_PREFLIGHT_UNVERIFIED" };
         }
         return { state: "blocked", code: "SOURCE_PREFLIGHT_INCOMPLETE" };
       }
-      this.readFailures.delete(key);
+      transientReadFailures.delete(key);
       const evidence: TaskEvidence = { planId: run.plan.id, taskId: task.id, replId: run.replId, source: "artifact-review", observedAt: this.now().toISOString(), outcome: "passed", artifactRef: `replit-app:${run.replId}/source-sha256/${inventory.digest}`, checks: task.acceptanceCriteria };
       return { state: "passed", evidence };
     } catch { return { state: "blocked", code: "SOURCE_PREFLIGHT_UNVERIFIED" }; }

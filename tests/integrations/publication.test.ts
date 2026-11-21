@@ -92,6 +92,23 @@ test("source observation recovery preserves existing app and rechecks gates with
   assert.deepEqual(calls, { create: 1, update: 1, publish: 0 });
 });
 
+test("publish response recovery only re-reads status and never republishes the existing app", async t => {
+  const { workflow, store, port, calls } = await fixture(t);
+  const id = randomUUID(); await workflow.enqueue(id, approval);
+  for (let i = 0; i < 5; i++) await workflow.step(id);
+  port.observePublish = async () => ({ state: "blocked", code: "PUBLISH_SCHEMA_UNVERIFIED" });
+  assert.equal((await workflow.step(id)).phase, "blocked");
+  await assert.rejects(workflow.resumePublishObservation(id, { ...approval, ownerUserId: "someone-else" }), /RUN_OWNERSHIP_MISMATCH/);
+  const previous = await store.load(id);
+  const resumed = await workflow.resumePublishObservation(id, approval);
+  assert.equal(resumed.replId, previous?.replId);
+  assert.deepEqual(resumed.evidence, previous?.evidence);
+  assert.equal(resumed.waitingSince, previous?.waitingSince);
+  port.observePublish = async () => ({ state: "ready", publicUrl: "https://studio.replit.app/" });
+  assert.equal((await workflow.step(id)).phase, "verifying");
+  assert.deepEqual(calls, { create: 1, update: 2, publish: 1 });
+});
+
 test("persisted dispatch intent after crash never blindly creates another app", async t => {
   const { workflow, store, calls } = await fixture(t);
   const id = randomUUID();

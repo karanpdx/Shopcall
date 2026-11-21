@@ -20,7 +20,17 @@ export class ReplitPublicationAdapter implements ReplitBuildPort {
     return { replId: result.replId };
   }
   async updateApp(replId: string, prompt: string) { await this.client.updateApp(replId, prompt); }
-  observeTask(run: BuildRun, task: StorefrontTask) { return this.observer.observe(run, task); }
+  observeTask(run: BuildRun, task: StorefrontTask): Promise<TaskObservation> {
+    if (task.id === "qa" && run.phase === "verifying") {
+      // A worker reconstructs this adapter each tick. Restore the exact published
+      // origin from durable provider evidence, rather than relying on the prior
+      // publish-status tick's in-memory allowlist mutation.
+      const published = run.candidateUrl && run.evidence.some(entry => entry.taskId === "deploy" && entry.source === "provider-publish-status" && entry.outcome === "passed" && entry.replId === run.replId && entry.planId === run.plan.id && entry.artifactRef === run.candidateUrl && entry.checks.includes("provider-published"));
+      if (!published) return Promise.resolve({ state: "blocked", code: "PUBLICATION_PROVENANCE_REQUIRED" });
+      this.registerPublication?.(run.candidateUrl!);
+    }
+    return this.observer.observe(run, task);
+  }
   async publishApp(replId: string) { await this.client.publishApp(replId); }
   async observePublish(replId: string) {
     const result = parsePublishResult(await this.client.getPublishStatus(replId), this.profile);

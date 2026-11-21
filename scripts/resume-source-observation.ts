@@ -7,7 +7,10 @@ import { PublicationWorkflow } from "../src/integrations/publication/workflow";
 
 // Trusted local operator recovery after fixing a source inspection failure.
 // No remote mutations or acceptance evidence are produced by this command.
+// Optional --publish-status resumes only a blocked publish-status read.
 const id = z.uuid().parse(process.argv[2]);
+const publishStatus = process.argv[3] === "--publish-status";
+if (process.argv.length > 4 || process.argv[3] && !publishStatus) throw new Error("Usage: resume-source-observation.ts <job-id> [--publish-status]");
 const source = new SqliteBackendJobSource(getDb(), repository());
 const spec = await source.getSpec(id);
 if (!spec) throw new Error("Approved build snapshot not found.");
@@ -17,7 +20,8 @@ const workflow = new PublicationWorkflow(new FileBuildRunStore(), source, {
   createApp: unexpected, updateApp: unexpected, observeTask: unexpected, publishApp: unexpected, observePublish: unexpected,
 }, { verify: unexpected });
 try {
-  const run = await workflow.resumeSourceObservation(id, { ownerUserId: spec.approvedByOwnerId, businessId: spec.businessId, approvalId: id });
+  const approval = { ownerUserId: spec.approvedByOwnerId, businessId: spec.businessId, approvalId: id };
+  const run = await (publishStatus ? workflow.resumePublishObservation(id, approval) : workflow.resumeSourceObservation(id, approval));
   console.log(JSON.stringify({ jobId: run.id, phase: run.phase, task: run.currentTaskId, existingAppPreserved: !!run.replId, remoteMutations: 0 }));
 } catch {
   console.error("Source observation recovery rejected. Check owner/snapshot and the exact blocked reason; uncertain provider mutations require separate reconciliation.");

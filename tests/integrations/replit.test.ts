@@ -161,3 +161,17 @@ test("verified publication presence false remains pending before status is avail
   assert.equal(parsePublishResult({ content: [], structuredContent: { found: "false" } }, profile).state, "blocked");
   assert.deepEqual(parsePublishResult({ content: [], structuredContent: { found: true, status: "success", url: "https://shop.replit.app" } }, profile), { state: "ready", publicUrl: "https://shop.replit.app/" });
 });
+
+test("new provider lifecycle labels remain pending without expanding exact publication success", () => {
+  const profile: ReplitResponseProfile = {
+    verifiedAt: "2026-11-20T00:00:00Z", creationIdPath: ["replId"],
+    publication: { presencePath: ["found"], statusPath: ["status"], urlPath: ["url"], readyValues: ["success"], pendingValues: ["pending"], failedValues: ["failed", "suspended"] },
+  };
+  for (const status of ["initializing", "provisioning", "building_container", "starting"]) {
+    assert.deepEqual(parsePublishResult({ content: [], structuredContent: { found: true, status, url: "https://shop.replit.app/" } }, profile), { state: "pending" });
+  }
+  assert.equal(parsePublishResult({ content: [], structuredContent: { found: true } }, profile).state, "blocked");
+  assert.equal(parsePublishResult({ content: [], structuredContent: { found: true, status: { phase: "success" } } }, profile).state, "blocked");
+  assert.equal(parsePublishResult({ content: [], structuredContent: { found: true, status: "success", url: "https://shop.replit.app/" } }, profile).state, "ready");
+  assert.equal(parsePublishResult({ content: [], structuredContent: { found: true, status: "failed" } }, profile).state, "failed");
+});

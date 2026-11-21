@@ -90,6 +90,23 @@ export class PublicationWorkflow {
     });
   }
 
+  /** Re-read publication status after calibrating a real provider response.
+   * The original publish request is never issued again by this recovery. */
+  async resumePublishObservation(id: string, approval: OwnerApproval): Promise<BuildRun> {
+    return this.store.withLock(id, async () => {
+      const run = await this.store.load(id);
+      if (!run || run.approval.ownerUserId !== approval.ownerUserId || run.approval.businessId !== approval.businessId || run.approval.approvalId !== approval.approvalId) throw new Error("RUN_OWNERSHIP_MISMATCH");
+      if (run.phase !== "blocked" || run.errorCode !== "PUBLISH_SCHEMA_UNVERIFIED" || run.currentTaskId !== "deploy" || !run.replId) throw new Error("PUBLISH_OBSERVATION_NOT_RETRYABLE");
+      assertPlanIntegrity(run.plan);
+      const approved = createStorefrontPlan(await this.authorization.getApprovedBrief(approval));
+      if (approved.snapshotHash !== run.plan.snapshotHash) throw new Error("APPROVAL_SNAPSHOT_CHANGED");
+      await this.store.reserveBusiness(run.approval.businessId, id);
+      const resumed: BuildRun = { ...run, phase: "publishing", errorCode: null, updatedAt: this.now().toISOString() };
+      await this.store.save(resumed);
+      return resumed;
+    });
+  }
+
   async enqueue(id: string, approval: OwnerApproval): Promise<BuildRun> {
     const brief = await this.authorization.getApprovedBrief(approval);
     const plan = createStorefrontPlan(brief);

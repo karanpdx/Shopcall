@@ -92,3 +92,44 @@ test("catalog write-absence claim requires complete source inventory and transie
   assert.deepEqual(await observer.observe(run, task), { state: "blocked", code: "SOURCE_PREFLIGHT_UNVERIFIED" });
   assert.equal(inspectStaticArtifacts({ artifacts: [{ path: "src/proxy.ts", source: files["src/proxy.ts"] }], digest: "test", complete: false, omittedPaths: ["src/unreadable-server.ts"] }, catalogUrl, plan.id).includes("no-catalog-write-artifacts"), false);
 });
+
+test("fresh runtime observer instances share the bounded transient retry count", async () => {
+  const f = fixture();
+  f.client.listAppFiles = async () => { throw new Error("transient source listing failure"); };
+  const run = { id: "fresh-runtime-retry-test", replId, plan } as BuildRun;
+  const task = plan.tasks.find(task => task.id === "catalogIntegration")!;
+  assert.equal((await new ReplitArtifactTaskObserver(f.client).observe(run, task)).state, "pending");
+  assert.equal((await new ReplitArtifactTaskObserver(f.client).observe(run, task)).state, "pending");
+  assert.deepEqual(await new ReplitArtifactTaskObserver(f.client).observe(run, task), { state: "blocked", code: "SOURCE_PREFLIGHT_UNVERIFIED" });
+});
+
+test("catalog preflight reviews runtime sources without treating test mocks as live write routes", async () => {
+  const f = fixture();
+  const read: string[] = [];
+  f.client.listAppFiles = async (_id, path) => ({ content: [{ type: "text", text: path ? "App.tsx\nproxy.ts\nproxy.spec.ts\n__tests__/" : "src/" }] });
+  f.client.readAppFile = async (_id, path) => {
+    read.push(path);
+    if (path.endsWith("proxy.spec.ts")) throw new Error("test-only mock must not enter runtime audit");
+    return { content: [{ type: "text", text: files[path as keyof typeof files] }] };
+  };
+  const result = await new ReplitArtifactTaskObserver(f.client).observe({ id: "runtime-test-exclusion", replId, plan } as BuildRun, plan.tasks.find(task => task.id === "catalogIntegration")!);
+  assert.equal(result.state, "passed");
+  assert.equal(read.some(path => path.includes("spec.ts") || path.includes("__tests__")), false);
+});
+
+test("inventory enforces an overall wall-clock budget even when one provider read hangs", async () => {
+  const f = fixture();
+  f.client.listAppFiles = async () => new Promise<never>(() => {});
+  const started = Date.now();
+  await assert.rejects(readSourceInventory(f.client, replId, { maxDirectories: 80, maxDepth: 8, maxFiles: 180, maxFileBytes: 200000, maxTotalBytes: 3000000, maxElapsedMs: 10 }), /ARTIFACT_TIME_LIMIT/);
+  assert.ok(Date.now() - started < 500);
+});
+
+test("budget expiration cannot attest complete runtime source or catalog write-absence", async () => {
+  const f = fixture();
+  const base = f.client.readAppFile;
+  f.client.readAppFile = async (_id, path) => path.endsWith("proxy.ts") ? new Promise<never>(() => {}) : base(_id, path);
+  const observer = new ReplitArtifactTaskObserver(f.client, () => new Date(), { maxDirectories: 80, maxDepth: 8, maxFiles: 180, maxFileBytes: 200000, maxTotalBytes: 3000000, maxElapsedMs: 10 });
+  const result = await observer.observe({ id: "budget-expiry-test", replId, plan } as BuildRun, plan.tasks.find(task => task.id === "catalogIntegration")!);
+  assert.equal(result.state, "pending");
+});

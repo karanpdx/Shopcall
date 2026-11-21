@@ -50,7 +50,12 @@ export function parsePublishResult(raw: ReplitToolResult, profile?: ReplitRespon
     if (found === false) return { state: "pending" };
     if (found !== true) return { state: "blocked", reason: "Provider publication presence does not match verified response profile." };
   }
-  const result = status(read(raw.structuredContent, verified.publication.statusPath), verified.publication);
+  const rawStatus = read(raw.structuredContent, verified.publication.statusPath);
+  let result = status(rawStatus, verified.publication);
+  // The live get_publish_status schema explicitly defines every other status as an
+  // in-progress lifecycle operation. Do not terminally block on a new progress label;
+  // exact verified success/failure values still govern readiness and failure.
+  if (result.state === "blocked" && typeof rawStatus === "string" && /^[A-Za-z][A-Za-z0-9_-]{0,99}$/.test(rawStatus)) result = { state: "pending" };
   if (result.state !== "ready") return result;
   const rawUrl = read(raw.structuredContent, verified.publication.urlPath);
   try {
