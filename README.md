@@ -1,16 +1,29 @@
-# Shopcall
+# lit
 
-Show your products. Tell your story. Get a Replit-generated storefront you can update with another call.
+**just call lit.** Tap one button, show what you make to the camera, say the price and how many you have, and approve once. Replit builds and publishes a real storefront, and the live link is emailed to you. A later camera-off call updates prices and stock at the same link, with no rebuild.
+
+The repository and some code still use the working name Shopcall.
+
+## How it works
+
+1. **Call.** The lit web app on your phone runs a voice call with a private ElevenLabs agent. The camera is optional.
+2. **Show and say.** Still photos are tied to the product they were taken for. Your voice sets the name, price and stock; the camera never does.
+3. **Approve.** Every change is a draft. Only your tap in the app publishes or applies anything. The voice agent can open the review but can't approve.
+4. **Build.** The backend hands the approved snapshot to Replit through its MCP server. The storefront reads the live public catalog on every load.
+5. **Verify, then email.** The link is emailed only after the published shop loads correctly for a logged-out visitor.
 
 ## Current status
 
-This is a **collaboration scaffold**, not a working end-to-end demo. It includes a responsive landing page, health route, shared Zod contracts, server-side ElevenLabs SDK factory, read-only connection check, and three contributor work areas. Voice calls, camera capture, authentication, catalog persistence, Replit OAuth/build/publish, URL verification, and email are still to implement. Nothing is deployed or published.
+Hackathon project. Nothing is deployed yet.
 
-Confirmed scope: working hackathon demo, one authenticated demo merchant, **fully automatic Replit app creation and publication**, and subsequent camera-off price/stock updates at the **same public URL**. No template fallback. See [decisions](docs/decisions.md) and [requirements](docs/requirements.md).
+- **On `main`:** catalog backend (owner sessions, drafts and approvals, photo uploads, public catalog API, build jobs), tested locally.
+- **On `feat/integrations`:** the combined demo branch with the one-tap call app, the ElevenLabs agent and the Replit publication pipeline. The ElevenLabs agent and Replit OAuth/tool discovery are provider-verified; the full Replit build, publish and logged-out check has not run end to end yet.
+
+Confirmed scope: one authenticated demo merchant, fully automatic Replit app creation and publication, and camera-off price/stock updates at the same public URL. No template fallback. See [decisions](docs/decisions.md) and [requirements](docs/requirements.md).
 
 ## Local setup
 
-Requires Node.js 22.13+ and npm. Each contributor uses their own clone, branch, and credentials.
+Requires Node.js 22.13+ and npm. Each contributor uses their own clone, branch and credentials.
 
 ```sh
 git clone https://github.com/karanpdx/Shopcall.git
@@ -20,19 +33,19 @@ cp .env.example .env.local
 npm run dev
 ```
 
-Open http://localhost:3000. `GET /api/health` explicitly reports scaffold status. `.env.local` is ignored; never commit or paste keys. Only the ElevenLabs key is needed for the connection check; the landing page needs no credentials.
+Open http://localhost:3000. `.env.local` is ignored; never commit or paste keys.
 
-For ElevenLabs onboarding, run `npx -y @elevenlabs/cli@latest onboard init` and follow its output. `npm run agent:setup` currently checks read-only agent-list access; it does **not** create or modify an agent. API access is not proof of a working browser call.
+For ElevenLabs onboarding, run `npx -y @elevenlabs/cli@latest onboard init` and follow its output. Having API access doesn't prove a browser call works.
 
-## Three-person work split
+## Team lanes
 
-| Contributor | Ownership | Suggested branch | Start here |
+| Lane | Owns | Branch | Start here |
 |---|---|---|---|
 | A — Call UI | `src/features/call/**`, `src/app/**` except API routes | `feat/call-ui` | [Person A](docs/team/person-a-call-ui.md) |
 | B — Catalog/backend | `src/server/**`, `src/app/api/**`, `migrations/**` | `feat/catalog-backend` | [Person B](docs/team/person-b-catalog.md) |
 | C — Integrations/jobs | `src/integrations/**`, `scripts/**` | `feat/integrations` | [Person C](docs/team/person-c-integrations.md) |
 
-Choose which person owns which area before coding. Names are unassigned. [Coordination and shared-file rules](docs/team/README.md) explain how to avoid overlap. [API contract](docs/api-contract.md) defines the handoffs. Contracts describe intended interfaces, not working routes.
+[Coordination and shared-file rules](docs/team/README.md) explain how to avoid overlap. The [API contract](docs/api-contract.md) defines the handoffs.
 
 ## Checks
 
@@ -42,15 +55,11 @@ npm run typecheck
 npm run build
 ```
 
-`npm run worker` intentionally exits with a not-implemented error. Person C replaces it with a durable publication worker. No fake build progress or successful publication is included.
+## Before calling it done
 
-Scaffold validation (November 20, 2026): 3 contract tests, TypeScript, and production build passed. ElevenLabs onboarding and read-only SDK agent-list request passed locally (zero agents visible); no agent was provisioned, no speech was generated, and no browser conversation was tested. Other contributors must onboard their own local credentials.
+1. **Replit:** app-owned OAuth → tool discovery → create → observable build readiness → publish → logged-out check of the public URL and current catalog.
+2. **Voice:** private agent → backend session credential → real browser call → photo capture tied to its draft → typed tool calls through authenticated routes.
+3. **Data:** the catalog and original photos survive calls and deployments. Don't deploy SQLite or uploads to ephemeral disks.
+4. **Email:** a real provider and sender, sent only after verified publication. Accepted mail isn't proof of delivery.
 
-## Integration gates
-
-1. Replit: application-owned OAuth → actual tool discovery → create → observable build readiness → publish → anonymously verify public URL and current catalog. Codex-side authentication is separate from backend credentials.
-2. ElevenLabs: private/authenticated agent → backend session credential → real browser call → ID-bound photo capture and typed authenticated tool bridge.
-3. Persistence: canonical catalog and original photos survive calls and deployments. SQLite dependency is available for local development; public deployment requires durable database/storage, selected by Person B. Do not deploy SQLite or uploads to ephemeral disks.
-4. Email: configured real provider and sender; notification only after verified publication. Accepted mail is not proof of delivery.
-
-See each contributor doc for acceptance criteria and integration tests. Final acceptance requires real camera photos, real voice, and a real publicly reachable Replit site; local checks cannot establish these.
+Final acceptance needs real camera photos, a real voice call and a publicly reachable Replit site; local checks can't establish these.
