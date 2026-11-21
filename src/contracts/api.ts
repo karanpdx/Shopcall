@@ -189,7 +189,7 @@ export const publicationStatus = z.enum(["pending", "completed", "failed"]);
 export type BuildStatus = z.infer<typeof buildStatus>;
 export type PublicationStatus = z.infer<typeof publicationStatus>;
 
-export const buildJobRequest = z.object({ designBrief: z.string().trim().max(4000).optional() }).strict();
+export const buildJobRequest = z.object({ designBrief: z.string().trim().max(4000).optional(), expectedCatalogRevision: z.number().int().nonnegative().optional() }).strict();
 export type BuildJobRequest = z.infer<typeof buildJobRequest>;
 
 export type BuildJob = {

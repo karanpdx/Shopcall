@@ -7,3 +7,6 @@ coverage/
 .shopcall/
 .DS_Store
 *.tsbuildinfo
+.vercel/
+.claude/worktrees/
+.vercel

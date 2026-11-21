@@ -1,0 +1,11 @@
+.git
+.env*
+.shopcall
+.next
+node_modules
+coverage
+tests
+scripts
+src/app/api
+.claude
+.codex

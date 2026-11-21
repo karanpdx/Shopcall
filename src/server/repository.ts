@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { randomUUID, randomBytes, createHash, timingSafeEqual } from "node:crypto";
 import type Database from "better-sqlite3";
 import {
   buildJobRequest, buildJobUpdate, productChange,
@@ -6,6 +6,7 @@ import {
   type DraftApprovalResponse, type Product, type ProductChange, type PublicCatalog, type ShopCallRepository,
 } from "@/contracts/api";
 import type { BuildPhase, PublicationRepository } from "@/contracts/integrations";
+import { proposeCatalogBatchInput, approveCatalogBatchInput, type CatalogBatch, type ProposeCatalogBatchInput, type ApproveCatalogBatchInput } from "@/integrations/catalog-batches/types";
 import { assetUrl, publicCatalogUrl } from "./config";
 import { getDb } from "./db";
 import { fail } from "./http";
@@ -36,6 +37,11 @@ type JobRow = {
   id: string; business_id: string; provider: string; provider_job_id: string | null; build_status: BuildJob["buildStatus"];
   publication_status: BuildJob["publicationStatus"]; public_url: string | null; error_message: string | null; spec: string;
   created_at: string; updated_at: string;
+};
+type BatchRow = {
+  id: string; business_id: string; call_id: string; expected_catalog_revision: number; idempotency_key: string;
+  request_hash: string; draft_ids: string; summary: string; status: CatalogBatch["status"];
+  confirmation_hash: string | null; apply_idempotency_key: string | null; expires_at: string; created_at: string; resolved_at: string | null;
 };
 
 // Whitelisted API-field → column maps; patch keys never reach SQL unmapped.
@@ -179,7 +185,10 @@ export class SqliteRepository implements ShopCallRepository {
 
   async createDraft(businessId: string, input: ProductChange): Promise<Draft> {
     const change = productChange.parse(input); // repository is a trust boundary for Lane C callers too
-    return this.db.transaction(() => {
+    return this.db.transaction(() => this.createDraftInTransaction(businessId, change)).immediate();
+  }
+
+  private createDraftInTransaction(businessId: string, change: ProductChange): Draft {
       let targetId: string | null = null;
       let previous: Record<string, unknown> | null = null;
       let expectedRevision: number | null = null;
@@ -208,7 +217,6 @@ export class SqliteRepository implements ShopCallRepository {
         VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?)`)
         .run(id, businessId, change.type, targetId, previous && JSON.stringify(previous), JSON.stringify(change), expectedRevision, now());
       return this.draftRow(businessId, id);
-    }).immediate();
   }
 
   async getDraft(businessId: string, draftId: string) {
@@ -234,9 +242,23 @@ export class SqliteRepository implements ShopCallRepository {
    */
   async approveDraft(businessId: string, draftId: string): Promise<DraftApprovalResponse> {
     return this.db.transaction(() => {
+      this.assertStandaloneDraft(businessId, draftId);
+      return this.approveDraftInTransaction(businessId, draftId);
+    }).immediate();
+  }
+
+  private assertStandaloneDraft(businessId: string, draftId: string) {
+    const linked = this.db.prepare("SELECT b.id FROM catalog_batches b, json_each(b.draft_ids) item WHERE b.business_id=? AND item.value=? LIMIT 1").get(businessId, draftId);
+    if (linked) fail(409, "CONFLICT", "This draft belongs to a combined proposal; approve or reject the complete review.");
+  }
+
+  private approveDraftInTransaction(businessId: string, draftId: string, expectedRevisionOverride?: number): DraftApprovalResponse {
       const draft = this.draftRow(businessId, draftId);
       if (draft.status !== "pending") fail(409, "CONFLICT", `Draft is already ${draft.status}.`);
-      const change = productChange.parse(draft.proposedValues);
+      const stored = productChange.parse(draft.proposedValues);
+      // Batch preflight checked every reviewed base revision under the same write lock.
+      // Later changes to the same product use its current internal revision guard.
+      const change = "expectedRevision" in stored && expectedRevisionOverride !== undefined ? { ...stored, expectedRevision: expectedRevisionOverride } : stored;
       const t = now();
       let productId: string | null = null;
 
@@ -289,7 +311,6 @@ export class SqliteRepository implements ShopCallRepository {
         product: productId ? toProduct(this.productRow(businessId, productId)) : null,
         business: change.type === "update_storefront" ? toBusiness(business) : null,
       };
-    }).immediate();
   }
 
   private applyProductUpdate(businessId: string, productId: string, expectedRevision: number, cols: Record<string, unknown>, t: string) {
@@ -303,10 +324,113 @@ export class SqliteRepository implements ShopCallRepository {
 
   async rejectDraft(businessId: string, draftId: string): Promise<Draft> {
     return this.db.transaction(() => {
+      this.assertStandaloneDraft(businessId, draftId);
       const draft = this.draftRow(businessId, draftId);
       if (draft.status !== "pending") fail(409, "CONFLICT", `Draft is already ${draft.status}.`);
       this.db.prepare("UPDATE drafts SET status = 'rejected', resolved_at = ? WHERE id = ? AND status = 'pending'").run(now(), draftId);
       return this.draftRow(businessId, draftId);
+    }).immediate();
+  }
+
+  // ---- Confirmation-gated atomic voice/catalog batches ----
+
+  private batchRow(businessId: string, id: string): BatchRow {
+    const row = isUuid(id) ? this.db.prepare("SELECT * FROM catalog_batches WHERE id = ? AND business_id = ?").get(id, businessId) as BatchRow | undefined : undefined;
+    return row ?? fail(404, "NOT_FOUND", "Catalog proposal not found");
+  }
+
+  getCatalogBatch(businessId: string, id: string): CatalogBatch {
+    const row = this.batchRow(businessId, id);
+    const draftIds = JSON.parse(row.draft_ids) as string[];
+    return { id: row.id, businessId: row.business_id, callId: row.call_id, expectedCatalogRevision: row.expected_catalog_revision,
+      status: row.status, draftIds, changes: draftIds.map(id => this.draftRow(businessId, id).proposedValues),
+      summary: JSON.parse(row.summary), expiresAt: row.expires_at, createdAt: row.created_at, resolvedAt: row.resolved_at };
+  }
+
+  async proposeCatalogBatch(businessId: string, input: ProposeCatalogBatchInput): Promise<CatalogBatch> {
+    const parsed = proposeCatalogBatchInput.parse(input);
+    const hash = createHash("sha256").update(JSON.stringify(parsed)).digest("hex");
+    return this.db.transaction(() => {
+      const existing = this.db.prepare("SELECT * FROM catalog_batches WHERE business_id = ? AND idempotency_key = ?").get(businessId, parsed.idempotencyKey) as BatchRow | undefined;
+      if (existing) {
+        if (existing.request_hash !== hash) fail(409, "CONFLICT", "Idempotency key belongs to a different proposed change.");
+        return this.getCatalogBatch(businessId, existing.id);
+      }
+      const business = this.db.prepare("SELECT * FROM businesses WHERE id = ?").get(businessId) as BusinessRow | undefined;
+      if (!business) fail(404, "NOT_FOUND", "Business not found");
+      if (business!.catalog_revision !== parsed.expectedCatalogRevision) fail(409, "STALE_REVISION", "Catalog changed; re-read and prepare a new review.");
+      const drafts = parsed.changes.map(change => this.createDraftInTransaction(businessId, change));
+      const summary = drafts.map(draft => {
+        const change = draft.proposedValues;
+        if (change.type === "create_product") return `Add ${change.product.name}: USD ${(change.product.priceCents / 100).toFixed(2)}, stock ${change.product.inventoryCount}`;
+        if (change.type === "update_storefront") return `Store details: ${JSON.stringify(change.patch)}`;
+        const title = this.productRow(businessId, change.productId).name;
+        if (change.type === "update_price") return `${title}: price USD ${(Number(draft.previousValues?.priceCents) / 100).toFixed(2)} → ${(change.priceCents / 100).toFixed(2)}`;
+        if (change.type === "update_stock") return `${title}: stock ${draft.previousValues?.inventoryCount} → ${change.inventoryCount}`;
+        if (change.type === "adjust_stock") return `${title}: stock ${draft.previousValues?.inventoryCount} → ${Number(draft.previousValues?.inventoryCount) + change.delta}`;
+        return `${title}: ${JSON.stringify(change.patch)}`;
+      });
+      const id = randomUUID();
+      const createdAt = now();
+      const expiresAt = new Date(Date.now() + 10 * 60_000).toISOString();
+      this.db.prepare(`INSERT INTO catalog_batches(id,business_id,call_id,expected_catalog_revision,idempotency_key,request_hash,draft_ids,summary,status,expires_at,created_at)
+        VALUES(?,?,?,?,?,?,?,?, 'pending',?,?)`).run(id, businessId, parsed.callId, parsed.expectedCatalogRevision, parsed.idempotencyKey, hash, JSON.stringify(drafts.map(draft => draft.id)), JSON.stringify(summary), expiresAt, createdAt);
+      return this.getCatalogBatch(businessId, id);
+    }).immediate();
+  }
+
+  /** Only the owner review route issues this secret. It is never returned by an agent tool. */
+  issueCatalogBatchConfirmation(businessId: string, id: string) {
+    return this.db.transaction(() => {
+      const row = this.batchRow(businessId, id);
+      if (row.status !== "pending" || Date.parse(row.expires_at) <= Date.now()) fail(409, "CONFLICT", "Proposal is resolved or expired; prepare a new review.");
+      const token = randomBytes(32).toString("base64url");
+      this.db.prepare("UPDATE catalog_batches SET confirmation_hash = ? WHERE id = ? AND business_id = ?").run(createHash("sha256").update(token).digest("hex"), id, businessId);
+      return { batch: this.getCatalogBatch(businessId, id), confirmationToken: token };
+    }).immediate();
+  }
+
+  async approveCatalogBatch(businessId: string, id: string, input: ApproveCatalogBatchInput): Promise<CatalogBatch> {
+    const parsed = approveCatalogBatchInput.parse(input);
+    return this.db.transaction(() => {
+      const row = this.batchRow(businessId, id);
+      const tokenHash = createHash("sha256").update(parsed.confirmationToken).digest("hex");
+      if (!row.confirmation_hash || !timingSafeEqual(Buffer.from(tokenHash), Buffer.from(row.confirmation_hash))) fail(403, "FORBIDDEN", "Owner review confirmation is required.");
+      if (row.status === "approved") {
+        if (row.apply_idempotency_key !== parsed.idempotencyKey) fail(409, "CONFLICT", "Proposal was already applied under a different request key.");
+        return this.getCatalogBatch(businessId, id);
+      }
+      if (row.status !== "pending" || Date.parse(row.expires_at) <= Date.now()) fail(409, "CONFLICT", "Proposal is resolved or expired.");
+      const business = this.db.prepare("SELECT catalog_revision FROM businesses WHERE id = ?").get(businessId) as { catalog_revision: number };
+      if (business.catalog_revision !== row.expected_catalog_revision) fail(409, "STALE_REVISION", "Catalog changed; re-read and confirm a new proposal.");
+      if (this.db.prepare("SELECT 1 FROM catalog_batches WHERE business_id = ? AND apply_idempotency_key = ? AND id != ?").get(businessId, parsed.idempotencyKey, id)) fail(409, "CONFLICT", "Apply request key already belongs to another proposal.");
+      const ids = JSON.parse(row.draft_ids) as string[];
+      const drafts = ids.map(id => this.draftRow(businessId, id));
+      // Validate every reviewed base revision before applying any change; one failure rolls all back.
+      for (const draft of drafts) {
+        if (draft.status !== "pending") fail(409, "CONFLICT", "A proposal draft was already resolved.");
+        const change = draft.proposedValues;
+        if ("productId" in change && this.productRow(businessId, change.productId).revision !== change.expectedRevision) staleRevision(toProduct(this.productRow(businessId, change.productId)));
+      }
+      for (const draft of drafts) {
+        const change = draft.proposedValues;
+        const expected = "productId" in change ? this.productRow(businessId, change.productId).revision : undefined;
+        this.approveDraftInTransaction(businessId, draft.id, expected);
+      }
+      this.db.prepare("UPDATE catalog_batches SET status='approved',apply_idempotency_key=?,resolved_at=? WHERE id=? AND business_id=?").run(parsed.idempotencyKey, now(), id, businessId);
+      return this.getCatalogBatch(businessId, id);
+    }).immediate();
+  }
+
+  async rejectCatalogBatch(businessId: string, id: string): Promise<CatalogBatch> {
+    return this.db.transaction(() => {
+      const row = this.batchRow(businessId, id);
+      if (row.status === "rejected") return this.getCatalogBatch(businessId, id);
+      if (row.status !== "pending") fail(409, "CONFLICT", "Proposal was already applied.");
+      const timestamp = now();
+      for (const draftId of JSON.parse(row.draft_ids) as string[]) this.db.prepare("UPDATE drafts SET status='rejected',resolved_at=? WHERE id=? AND business_id=? AND status='pending'").run(timestamp, draftId, businessId);
+      this.db.prepare("UPDATE catalog_batches SET status='rejected',resolved_at=? WHERE id=? AND business_id=?").run(timestamp, id, businessId);
+      return this.getCatalogBatch(businessId, id);
     }).immediate();
   }
 
@@ -340,6 +464,7 @@ export class SqliteRepository implements ShopCallRepository {
     return this.db.transaction(() => {
       const b = this.db.prepare("SELECT * FROM businesses WHERE id = ?").get(businessId) as BusinessRow | undefined;
       if (!b) return fail(404, "NOT_FOUND", "Business not found");
+      if (req.expectedCatalogRevision !== undefined && req.expectedCatalogRevision !== b.catalog_revision) fail(409, "STALE_REVISION", "Catalog changed since review. Re-read and approve the updated catalog.");
       const active = this.db.prepare(`SELECT id FROM build_jobs WHERE business_id = ?
         AND (build_status IN ('queued', 'running') OR (build_status = 'completed' AND publication_status = 'pending'))`).get(businessId);
       if (active) fail(409, "CONFLICT", "A build is already in progress for this store.");

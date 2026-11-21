@@ -1,5 +1,7 @@
 # Person C — ElevenLabs, Replit OAuth, jobs, email
 
+Assigned to Codex. The product-side harness coordinates ordered specialist tasks in one merchant Replit app (user-confirmed); it does not launch parallel contributor agents as a product feature. See `part-a-critical-update.md` and `part-b-critical-update.md` for cross-lane implications.
+
 ## Ownership
 
 Own `src/integrations/**`, `scripts/**`, `tests/integrations/`. Coordinate package manifests/lockfile, `.env.example`, root config. Export provider functions for B to call; B owns all `src/app/api/**` route files. Do not edit frontend pages or database implementations.

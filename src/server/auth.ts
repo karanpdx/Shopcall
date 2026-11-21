@@ -46,6 +46,7 @@ export function assertSameOrigin(req: Request) {
   const host = req.headers.get("x-forwarded-host") ?? req.headers.get("host");
   if (host) allowed.add(`${req.headers.get("x-forwarded-proto") ?? new URL(req.url).protocol.replace(":", "")}://${host}`);
   if (process.env.APP_BASE_URL) allowed.add(new URL(process.env.APP_BASE_URL).origin);
+  if (process.env.PHONE_DEMO_ORIGIN) allowed.add(new URL(process.env.PHONE_DEMO_ORIGIN).origin);
   if (!allowed.has(origin)) fail(403, "FORBIDDEN", "Cross-origin request rejected.");
 }
 
@@ -59,11 +60,22 @@ export async function login(req: Request, body: unknown) {
   if (!demoEmail || !demoPassword || demoPassword.length < 12) {
     return fail(503, "CONFIGURATION_ERROR", "DEMO_OWNER_EMAIL and DEMO_OWNER_PASSWORD (12+ chars) must be configured.");
   }
+  const accounts = [{ email: demoEmail, password: demoPassword, businessName: process.env.DEMO_BUSINESS_NAME || "Demo Store" }];
+  const secondEmail = process.env.DEMO_SECOND_OWNER_EMAIL;
+  const secondPassword = process.env.DEMO_SECOND_OWNER_PASSWORD;
+  if (secondEmail || secondPassword) {
+    if (!secondEmail || !secondPassword || secondPassword.length < 12 || secondEmail.toLowerCase() === demoEmail.toLowerCase()) return fail(503, "CONFIGURATION_ERROR", "Second demo account requires a distinct email and a password of at least 12 characters.");
+    accounts.push({ email: secondEmail, password: secondPassword, businessName: process.env.DEMO_SECOND_BUSINESS_NAME || "New Demo Store" });
+  }
   sessionSecret(); // fail on missing config before revealing whether credentials matched
-  const emailOk = safeEqual(email.toLowerCase(), demoEmail.toLowerCase());
-  if (!(safeEqual(password, demoPassword) && emailOk)) fail(401, "UNAUTHORIZED", "Invalid email or password.");
+  const matched = accounts.find(account => {
+    const emailOk = safeEqual(email.toLowerCase(), account.email.toLowerCase());
+    const passwordOk = safeEqual(password, account.password);
+    return emailOk && passwordOk;
+  });
+  if (!matched) return fail(401, "UNAUTHORIZED", "Invalid email or password.");
 
-  const { owner, business } = repository().ensureOwnerBusiness(demoEmail.toLowerCase(), process.env.DEMO_BUSINESS_NAME || "Demo Store");
+  const { owner, business } = repository().ensureOwnerBusiness(matched.email.toLowerCase(), matched.businessName);
   const token = randomBytes(32).toString("base64url");
   const expiresAt = new Date(Date.now() + SESSION_TTL_MS).toISOString();
   repository().createSession(owner.id, hashToken(token), expiresAt);
