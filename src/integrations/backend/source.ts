@@ -43,6 +43,7 @@ export class SqliteBackendJobSource implements BackendJobSource {
   async getVerifiedOwnerEmail(ownerUserId: string, businessId: string): Promise<string | null> {
     const row = this.db.prepare("SELECT o.email FROM owners o JOIN businesses b ON b.owner_id=o.id WHERE o.id=? AND b.id=?").get(ownerUserId, businessId) as { email: string } | undefined;
     // Canonical configured demo identity, not independent email inbox verification.
-    return row && this.demoEmail && row.email.toLowerCase() === this.demoEmail.toLowerCase() ? row.email : null;
+    const configured = [this.demoEmail, process.env.DEMO_SECOND_OWNER_EMAIL].filter((value): value is string => !!value).map(value => value.toLowerCase());
+    return row && configured.includes(row.email.toLowerCase()) ? row.email : null;
   }
 }
