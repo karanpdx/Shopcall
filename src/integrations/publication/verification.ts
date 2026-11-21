@@ -1,6 +1,7 @@
 import { chromium, type Browser } from "playwright-core";
 import { parseCanonicalCatalog, type NormalizedPublicCatalog, type StorefrontPlan, type TaskEvidence } from "../orchestrator";
 import type { StorefrontVerifier } from "./workflow";
+import { approvedContactBrowserScript } from "./contact";
 
 export type VerificationCatalog = NormalizedPublicCatalog;
 
@@ -51,6 +52,7 @@ export class PlaywrightStorefrontCheck implements AnonymousBrowserCheck {
     try {
       const context = await browser.newContext({ serviceWorkers: "block", acceptDownloads: false, viewport: { width: 390, height: 844 } });
       await context.addInitScript("globalThis.__name ??= (target, name) => Object.defineProperty(target, 'name', { value: name, configurable: true });");
+      await context.addInitScript(approvedContactBrowserScript);
       const errors: string[] = [];
       await context.routeWebSocket("**/*", socket => socket.close());
       await context.route("**/*", async route => {
@@ -91,7 +93,7 @@ export class PlaywrightStorefrontCheck implements AnonymousBrowserCheck {
             return visible(image) && image.complete && image.naturalWidth > 0 && (source.href === product.imageUrl || source.searchParams.get("url") === product.imageUrl);
           })) return false;
         }
-        const contact = [...root.querySelectorAll<HTMLAnchorElement>('a[href^="mailto:"]')].some(link => visible(link) && link.href === `mailto:${expected.business.contactEmail}`);
+        const contact = [...root.querySelectorAll<HTMLAnchorElement>('a[href^="mailto:"]')].some(link => visible(link) && window.__shopcallApprovedContact(link.href, expected.business.contactEmail));
         return contact && ![...document.querySelectorAll("button,a")].some(element => /^(?:checkout|add to cart|pay now)$/i.test((element.textContent ?? "").trim()));
       }, { expected });
       return passed && errors.length === 0;

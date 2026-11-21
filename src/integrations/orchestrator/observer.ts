@@ -1,5 +1,6 @@
 import { chromium, type Browser } from "playwright-core";
 import { allowedPublicUrl } from "../publication/verification";
+import { approvedContactBrowserScript } from "../publication/contact";
 import type { BuildRun, TaskObservation } from "../publication/workflow";
 import { assertPlanIntegrity, type StorefrontPlan, type StorefrontTask } from "./plan";
 import { evaluateTaskGate, type TaskEvidence } from "./evidence";
@@ -67,6 +68,7 @@ export class PlaywrightPreviewInspector implements PreviewInspector {
     try {
       const context = await browser.newContext({ serviceWorkers: "block", acceptDownloads: false });
       await context.addInitScript("globalThis.__name ??= (target, name) => Object.defineProperty(target, 'name', { value: name, configurable: true });");
+      await context.addInitScript(approvedContactBrowserScript);
       await context.routeWebSocket("**/*", socket => socket.close());
       await context.route("**/*", async route => {
         const target = new URL(route.request().url());
@@ -110,7 +112,7 @@ export class PlaywrightPreviewInspector implements PreviewInspector {
             const labels = (control as HTMLInputElement).labels;
             return Boolean(control.getAttribute("aria-label")?.trim() || labelled?.trim() || control.innerText?.trim() || (labels && [...labels].some(label => label.textContent?.trim())) || (control instanceof HTMLInputElement && control.type === "submit" && control.value.trim()));
           });
-          const email = [...document.querySelectorAll<HTMLAnchorElement>('a[href^="mailto:"]')].some(anchor => visible(anchor) && anchor.href === `mailto:${expected.business.contactEmail}`);
+          const email = [...document.querySelectorAll<HTMLAnchorElement>('a[href^="mailto:"]')].some(anchor => visible(anchor) && window.__shopcallApprovedContact(anchor.href, expected.business.contactEmail));
           const fakeCheckout = controls.some(control => /^(?:checkout|add to cart|pay now)$/i.test((control.textContent ?? "").trim()));
           return {
             layout: document.documentElement.scrollWidth <= innerWidth + 1 && Boolean(document.querySelector('meta[name="viewport"]')?.getAttribute("content")?.includes("width=device-width")),
@@ -150,7 +152,7 @@ export class PlaywrightPreviewInspector implements PreviewInspector {
           }
           const message = notice?.innerText ?? "";
           const honestMessage = state === "empty" ? /no products|nothing|empty|coming soon|not yet/i.test(message) : /unable|unavailable|try again|could not|failed|error|problem/i.test(message);
-          return Boolean(visible && document.body.innerText.includes("Verification scenario") && honestMessage && document.querySelectorAll("[data-shopcall-product]").length === 0);
+          return Boolean(visible && /verification\s+scenario/i.test(document.body.innerText) && honestMessage && document.querySelectorAll("[data-shopcall-product]").length === 0);
         }, { state });
       }
       if (scenariosPassed) checks.add("honest-empty-error-states");
