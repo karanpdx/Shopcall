@@ -64,6 +64,29 @@ test("capture reports success only from actual ID-bound image upload result", as
   assert.equal(result.data.saved, true);
 });
 
+test("complete spoken item triggers one draft-bound still automatically with camera on", async () => {
+  const captured: string[] = [];
+  const { tools } = setup(() => ({ draft: { id: DRAFT, fields: { title: "Blue mug", priceMinor: 2400, quantityOnHand: 0 }, imageAssetId: null } }), {
+    captureForDraft: async id => { captured.push(id); return { ok: true, captureId: "actual-upload", thumbnailUrl: "/api/assets/actual-upload" }; },
+  });
+  const result = parse(await tools.record_product_details({ productDraftId: DRAFT, title: "Blue mug", priceMinor: 2400, quantityOnHand: 0 }));
+  assert.deepEqual(captured, [DRAFT]);
+  assert.equal(result.data.autoCapture.saved, true);
+  assert.equal(result.data.autoCapture.captureId, "actual-upload");
+  assert.equal(result.data.autoCapture.productDraftId, DRAFT);
+});
+
+test("automatic still never runs with camera off, missing facts or an existing photo", async () => {
+  for (const scenario of [{ camera: false, stock: 2, photo: null }, { camera: true, stock: undefined, photo: null }, { camera: true, stock: 2, photo: "existing-image" }]) {
+    let captured = false;
+    const { tools } = setup(() => ({ draft: { id: DRAFT, fields: { title: "Mug", priceMinor: 2400, quantityOnHand: scenario.stock }, imageAssetId: scenario.photo } }), {
+      isCameraOn: () => scenario.camera, captureForDraft: async () => { captured = true; return { ok: true, captureId: "never", thumbnailUrl: "never" }; },
+    });
+    await tools.record_product_details({ productDraftId: DRAFT, title: "Mug", priceMinor: 2400 });
+    assert.equal(captured, false);
+  }
+});
+
 test("review can open but agent receives no owner confirmation token and never applies", async () => {
   let opened = false;
   const { tools, seen } = setup(() => ({ action: "show_catalog_review", approved: false, applied: false }), { openConfirmation: async () => { const ownerOnlyToken = "SECRET_NOT_FOR_AGENT"; opened = ownerOnlyToken.length > 0; return true; } });
@@ -72,6 +95,17 @@ test("review can open but agent receives no owner confirmation token and never a
   assert.equal(result.includes("SECRET_NOT_FOR_AGENT"), false);
   assert.equal(parse(result).data.approved, false);
   assert.equal(seen.some(request => request.path.endsWith("/confirm")), false);
+});
+
+test("backend-corrected publication handle opens publication UI rather than a nonexistent catalog batch", async () => {
+  let kind: string | null = null;
+  const { tools } = setup(() => ({ action: "show_publication_review", proposalId: PROPOSAL, approved: false }), {
+    openConfirmation: async actual => { kind = actual; return true; },
+  });
+  const result = parse(await tools.show_confirmation({ kind: "catalog_change", proposalId: PROPOSAL }));
+  assert.equal(result.data.opened, true);
+  assert.equal(result.data.applied, false);
+  assert.equal(kind, "publish");
 });
 
 test("ambiguous references retain backend clarification result", async () => {
@@ -83,4 +117,15 @@ test("malformed bridge bodies are errors, never success", async () => {
   const api = createApiClient((async () => Response.json({ business: "x" })) as typeof fetch);
   const { tools } = setup(undefined, { api });
   assert.equal(parse(await tools.get_catalog_summary({})).ok, false);
+});
+
+test("a late tool result from a signed-out call cannot populate the next account", async () => {
+  let current: string | null = CALL;
+  const { tools, getDrafts } = setup(() => {
+    current = null;
+    return { draft: { id: PRODUCT, fields: { title: "Old account item" } } };
+  }, { callId: () => current });
+  const result = parse(await tools.create_product_draft({ proposedTitle: "Old account item" }));
+  assert.equal(result.error.code, "CALL_CHANGED");
+  assert.equal(getDrafts().byId[PRODUCT], undefined);
 });

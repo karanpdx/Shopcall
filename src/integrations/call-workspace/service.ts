@@ -159,7 +159,7 @@ export class CallWorkspaceService {
         parseClientToolArgs(name, raw);
         const business = await this.catalog.getBusiness(owner.businessId);
         if (!business) return fail(404, "NOT_FOUND", "Business not found.");
-        return { business: { id: business.id, name: business.name, description: business.description, currencyCode: "USD", catalogRevision: business.catalogRevision, publishedUrl: business.publishedUrl }, products: await this.catalog.listProducts(owner.businessId), ...await this.current(owner, callId) };
+        return { business: { id: business.id, name: business.name, description: business.description, currencyCode: "USD", catalogRevision: business.catalogRevision, publishedUrl: business.publishedUrl }, products: await this.catalog.listProducts(owner.businessId), ...await this.current(owner, callId), publicationReview: { kind: "publish", proposalId: call.publicationReviewId, opensOnly: true, isBuildJobId: false } };
       }
       case "resolve_product_reference": {
         const { phrase } = parseClientToolArgs(name, raw);
@@ -187,7 +187,10 @@ export class CallWorkspaceService {
       }
       case "show_confirmation": {
         const args = parseClientToolArgs(name, raw);
-        if (args.kind === "publish") {
+        // The publication handle is a tokenless preview for THIS authenticated
+        // call. Correct a known semantic ID mix-up without applying anything or
+        // accepting arbitrary catalog proposals as publication approval.
+        if (args.kind === "publish" || args.proposalId === call.publicationReviewId) {
           if (args.proposalId !== call.publicationReviewId) fail(404, "NOT_FOUND", "Publication review not found for this call.");
           return { action: "show_publication_review", proposalId: args.proposalId, ...await this.current(owner, callId), approved: false, published: false };
         }
@@ -197,6 +200,7 @@ export class CallWorkspaceService {
       }
       case "get_build_status": {
         const args = parseClientToolArgs(name, raw);
+        if (args.buildJobId === call.publicationReviewId) return { job: null, reason: "REVIEW_HANDLE_IS_NOT_BUILD_JOB", savedDraftsUnchanged: true, message: "This ID opens the current call's publication review; it is not a build job. Product details are saved. A build job ID exists only after the owner confirms publication in the app." };
         return { job: await this.catalog.getBuildJob(owner.businessId, args.buildJobId) ?? fail(404, "NOT_FOUND", "Build job not found.") };
       }
     }

@@ -32,6 +32,7 @@ export function createClientTools(deps: ToolDeps): Record<ClientToolName, Handle
         if (!deps.drafts().byId[productDraftId]) return failure("NOT_FOUND", "Product draft is not in this call.");
       }
       const response = await deps.api.voiceTool(callId, name, parsed.data, deps.newIdempotencyKey());
+      if (deps.callId() !== callId) return failure("CALL_CHANGED", "This call ended or the signed-in account changed. Discard the old tool result.");
       if (!response.ok) return JSON.stringify(response);
       const data = response.data;
       if (data.draft && typeof data.draft === "object") deps.dispatch({ type: "draft_saved", draft: flattenWorkingDraft(data.draft as WorkspaceDraft) });
@@ -40,12 +41,27 @@ export function createClientTools(deps: ToolDeps): Record<ClientToolName, Handle
       if (name === "capture_product_photo") {
         const draftId = (parsed.data as { productDraftId: string }).productDraftId;
         const capture = await deps.captureForDraft(draftId);
+        if (deps.callId() !== callId) return failure("CALL_CHANGED", "This call is no longer current.");
         return capture.ok ? JSON.stringify({ ok: true, data: { ...capture, productDraftId: draftId, saved: true } }) : failure("CAPTURE_FAILED", capture.error);
       }
       if (name === "show_confirmation") {
         const args = parsed.data as z.infer<typeof clientToolSchemas.show_confirmation>;
-        const opened = await deps.openConfirmation(args.kind, args.proposalId);
+        const kind = data.action === "show_publication_review" ? "publish" : args.kind;
+        const proposalId = data.action === "show_publication_review" && typeof data.proposalId === "string" ? data.proposalId : args.proposalId;
+        const opened = await deps.openConfirmation(kind, proposalId);
         return opened ? JSON.stringify({ ok: true, data: { opened: true, approved: false, applied: false } }) : failure("NOT_READY", "Owner review could not open. No changes were applied.");
+      }
+      if (name === "record_product_details") {
+        const draft = data.draft as WorkspaceDraft | undefined;
+        const id = (parsed.data as { productDraftId: string }).productDraftId;
+        // One selected still when the owner has enabled the camera and supplied
+        // this item's critical facts. Never wait for a second spoken photo yes.
+        if (draft?.id === id && !draft.imageAssetId && deps.isCameraOn() && draft.fields?.title?.trim() && typeof draft.fields.priceMinor === "number" && typeof draft.fields.quantityOnHand === "number") {
+          const capture = await deps.captureForDraft(id);
+          if (deps.callId() !== callId) return failure("CALL_CHANGED", "This call is no longer current.");
+          await deps.refreshWorkspace?.();
+          return JSON.stringify({ ok: true, data: { ...data, autoCapture: capture.ok ? { ...capture, productDraftId: id, saved: true } : { saved: false, error: capture.error } } });
+        }
       }
       await deps.refreshWorkspace?.();
       // Review tokens are issued by a separate owner UI route, never this bridge/tool response.

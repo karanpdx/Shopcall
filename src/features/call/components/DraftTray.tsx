@@ -56,6 +56,7 @@ function DraftCard({ draft, active, cameraOn, onSelect, onCapture, onUpload, onR
       </button>
       {missing.length > 0 && <p className="missing">Still needs: {missing.map(m => LABELS[m]).join(", ")}</p>}
       {draft.approved && <p className="muted">Approved and saved to your catalog. Use a new call to change this listing.</p>}
+      {draft.description && <p>{draft.description}</p>}
 
       <ul className="thumbs" aria-label={`Photos for ${draft.title || "this product"}`}>
         {draft.captures.map(c => (
@@ -94,6 +95,7 @@ function DraftCard({ draft, active, cameraOn, onSelect, onCapture, onUpload, onR
 
 function DraftEditor({ draft, onSave, onDone }: { draft: DraftView; onSave: (p: DraftPatch) => Promise<string | null>; onDone: () => void }) {
   const [title, setTitle] = useState(draft.title);
+  const [description, setDescription] = useState(draft.description);
   const [price, setPrice] = useState(draft.priceMinor !== null ? (draft.priceMinor / 100).toFixed(2) : "");
   const [qty, setQty] = useState(draft.quantityOnHand?.toString() ?? "");
   const [error, setError] = useState<string | null>(null);
@@ -106,7 +108,7 @@ function DraftEditor({ draft, onSave, onDone }: { draft: DraftView; onSave: (p: 
     const quantity = Number(qty);
     if (!/^\d+$/.test(qty.trim()) || !Number.isSafeInteger(quantity)) return setError("Enter the exact whole number of items available. Zero means sold out.");
     setBusy(true);
-    const err = await onSave({ title: title.trim() || undefined, priceMinor, inventoryTracked: true, quantityOnHand: quantity });
+    const err = await onSave({ title: title.trim() || undefined, description: description.trim(), priceMinor, inventoryTracked: true, quantityOnHand: quantity });
     setBusy(false);
     if (err) setError(err);
     else onDone();
@@ -115,6 +117,7 @@ function DraftEditor({ draft, onSave, onDone }: { draft: DraftView; onSave: (p: 
   return (
     <form className="draft-editor" onSubmit={submit}>
       <label className="field"><span>Name</span><input value={title} maxLength={160} onChange={e => setTitle(e.target.value)} /></label>
+      <label className="field"><span>Description</span><textarea value={description} maxLength={4000} rows={3} onChange={e => setDescription(e.target.value)} /></label>
       <label className="field"><span>Price ({draft.currencyCode})</span><input inputMode="decimal" value={price} onChange={e => setPrice(e.target.value)} /></label>
       <label className="field"><span>In stock</span><input inputMode="numeric" value={qty} onChange={e => setQty(e.target.value)} /></label>
       {error && <p className="error" role="alert">{error}</p>}

@@ -15,15 +15,19 @@ test("owner sees generated suggestions/photos before explicitly applying; origin
   const draft = { id: draftId, callId, fields: { title: "Mug", description: "Owner description", priceMinor: 2400, quantityOnHand: 4, currencyCode: "USD", inventoryTracked: true }, imageAssetId: original, imageUrl: `/api/assets/${original}`, revision: 5, proposalId: null, ready: true };
   const job: MediaJobView = { id: "media-job", productDraftId: draftId, originalAssetId: original, originalUrl: `/api/assets/${original}`, enhancedAssetId: enhanced, enhancedUrl: `/api/assets/${enhanced}`, sourceDraftRevision: 2, currentDraftRevision: 2, analysisStatus: "ready", enhancementStatus: "ready", selectedVariant: "original", suggestedTitle: "Blue glazed mug", suggestedDescription: "Blue glaze and a curved handle.", titleApplied: false, descriptionApplied: false, errorCode: null, evidence: { analysisModel: "fixture", enhancementModel: "fixture", analysisStartedAt: null, analysisCompletedAt: null, enhancementStartedAt: null, enhancementCompletedAt: null }, createdAt: "2026-11-20T22:00:00Z", updatedAt: "2026-11-20T22:00:00Z" };
   const choices: Record<string, unknown>[] = [];
+  let mediaReadyAt: number | null = null;
+  let signedOut = false;
   try {
     const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
     await page.addInitScript(({ callId }) => { sessionStorage.setItem("shopcall:working-call", callId); }, { callId });
     await page.route("**/api/**", async route => {
       const path = new URL(route.request().url()).pathname;
       const respond = (data: unknown) => route.fulfill({ json: { ok: true, data } });
-      if (path === "/api/session") return respond({ owner: { id: ownerId, email: "owner@example.com" }, business: { id: businessId, name: "Ceramics", slug: "ceramics" }, expiresAt: "2099-01-01T00:00:00Z" });
+      if (path === "/api/session") return signedOut ? route.fulfill({ status: 401, json: { ok: false, error: { code: "UNAUTHORIZED", message: "Sign in required" } } }) : respond({ owner: { id: ownerId, email: "owner@example.com" }, business: { id: businessId, name: "Ceramics", slug: "ceramics" }, expiresAt: "2099-01-01T00:00:00Z" });
+      if (path === "/api/auth/logout") { signedOut = true; return respond({ signedOut: true }); }
       if (path === "/api/business") return respond({ id: businessId, name: "Ceramics", contactEmail: "owner@example.com", catalogRevision: 0 });
       if (path === `/api/calls/${callId}`) return respond({ call: { id: callId, status: "ended", brief: {}, publicationReviewId: ownerId }, drafts: [draft] });
+      if (path === `/api/calls/${callId}/end`) return respond({ id: callId, status: "ended", brief: {} });
       if (path.endsWith("/media/choice")) {
         const choice = route.request().postDataJSON(); choices.push(choice);
         assert.equal(choice.expectedDraftRevision, draft.revision);
@@ -33,12 +37,20 @@ test("owner sees generated suggestions/photos before explicitly applying; origin
         draft.revision++; job.currentDraftRevision = draft.revision;
         return respond({ job });
       }
-      if (path.endsWith("/media")) return respond({ job });
+      if (path.endsWith("/media")) {
+        mediaReadyAt ??= Date.now() + 500;
+        return respond({ job: Date.now() < mediaReadyAt ? { ...job, analysisStatus: "running", enhancementStatus: "queued", enhancedAssetId: null, enhancedUrl: null, suggestedTitle: null, suggestedDescription: null } : job });
+      }
       if (path.startsWith("/api/assets/")) return route.fulfill({ contentType: "image/png", body: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aVPsAAAAASUVORK5CYII=", "base64") });
       return route.fulfill({ status: 404, json: { ok: false, error: { code: "NOT_FOUND", message: "Fixture endpoint" } } });
     });
     await page.goto(url!);
-    await page.getByRole("button", { name: "Products: 1", exact: true }).click();
+    await page.getByRole("button", { name: "Analyzing photo… for Mug. Open products", exact: true }).waitFor();
+    const livePreview = page.getByRole("button", { name: "Enhanced preview ready for Mug. Open products", exact: true });
+    await livePreview.waitFor();
+    assert.equal(await page.getByRole("img", { name: "Generated preview", exact: true }).getAttribute("src"), `/api/assets/${enhanced}`);
+    assert.equal(choices.length, 0, "Main-call generated preview must not silently select or apply output.");
+    await livePreview.click();
     await page.getByText("Blue glazed mug", { exact: true }).waitFor();
     assert.equal(choices.length, 0, "Seeing generated output must not silently apply it.");
     assert.equal(await page.getByRole("button", { name: "Start call", exact: true }).count(), 1);
@@ -60,5 +72,9 @@ test("owner sees generated suggestions/photos before explicitly applying; origin
     assert.equal(job.selectedVariant, "original");
     assert.equal(await page.locator("video.ft-video").isVisible(), false);
     assert.deepEqual(choices.map(choice => choice.useEnhanced).filter(value => value !== undefined), [true, false]);
+    await page.getByRole("button", { name: "Sign out", exact: true }).click();
+    await page.getByRole("heading", { name: "Sign in to your store", exact: true }).waitFor();
+    assert.equal(signedOut, true);
+    assert.equal(await page.evaluate(() => sessionStorage.getItem("shopcall:working-call")), null);
   } finally { await browser.close(); }
 });

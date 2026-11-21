@@ -32,6 +32,22 @@ async function invoke(cookie: string, callId: string, name: string, args: unknow
   return tools.POST(call("POST", "/api/voice/tools", { cookie, body: { callId, name, arguments: args, idempotencyKey: key } }));
 }
 
+test("publication review handle mix-up opens only current call preview and never pretends to be a build job", async () => {
+  const a = await signIn("review-handle-owner@example.com"); const c = await start(a.cookie);
+  const shown = await body(await invoke(a.cookie, c.id, "show_confirmation", { kind: "catalog_change", proposalId: c.publicationReviewId }));
+  assert.equal(shown.ok, true);
+  assert.equal(shown.data.action, "show_publication_review");
+  assert.equal(shown.data.proposalId, c.publicationReviewId);
+  assert.equal(shown.data.approved, false);
+  assert.equal(shown.data.published, false);
+  const status = await body(await invoke(a.cookie, c.id, "get_build_status", { buildJobId: c.publicationReviewId }));
+  assert.equal(status.ok, true);
+  assert.equal(status.data.job, null);
+  assert.equal(status.data.reason, "REVIEW_HANDLE_IS_NOT_BUILD_JOB");
+  assert.deepEqual(await repository().listProducts(a.session.business.id), []);
+  assert.equal((await invoke(a.cookie, c.id, "show_confirmation", { kind: "publish", proposalId: randomUUID() })).status, 404);
+});
+
 test("call APIs require owner and strict origin, derive identity from session, and retain drafts after end", async () => {
   assert.equal((await calls.POST(call("POST", "/api/calls", { body: { mode: "create", idempotencyKey: "missing" } }))).status, 401);
   const { cookie, session } = await signIn("call-a@example.com");

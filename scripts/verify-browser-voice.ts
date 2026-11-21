@@ -10,6 +10,8 @@ const context = await browser.newContext({ viewport: { width: 390, height: 844 }
 let callId: string | undefined;
 let audioReceived = false;
 let providerConnected = false;
+let providerDisconnected = false;
+let cameraOffPreservedVoice = false;
 try {
   const login = await context.request.post(new URL("/api/auth/login", base).href, {
     headers: { Origin: base.origin }, data: { email: process.env.DEMO_OWNER_EMAIL, password: process.env.DEMO_OWNER_PASSWORD },
@@ -23,6 +25,7 @@ try {
   });
   page.on("websocket", socket => {
     if (!socket.url().startsWith("wss://api.elevenlabs.io/")) return;
+    socket.on("close", () => { providerDisconnected = true; });
     socket.on("framereceived", event => {
       try {
         const frame = JSON.parse(String(event.payload));
@@ -36,7 +39,14 @@ try {
   const deadline = Date.now() + 20_000;
   while (!audioReceived && Date.now() < deadline) await page.waitForTimeout(200);
   if (!providerConnected || !audioReceived) throw new Error("Live check did not receive provider connection metadata and greeting audio within 20 seconds.");
-  console.log(JSON.stringify({ providerConnected, greetingAudioReceived: audioReceived, syntheticMicrophone: true, physicalPhoneVerified: false, catalogMutationsRequested: false }));
+  if (process.argv.includes("--camera")) {
+    await page.getByRole("button", { name: "Turn camera on", exact: true }).click();
+    await page.getByRole("button", { name: "Turn camera off", exact: true }).click();
+    await page.waitForTimeout(500);
+    cameraOffPreservedVoice = !providerDisconnected && await page.getByRole("button", { name: "Mute microphone", exact: true }).isEnabled();
+    if (!cameraOffPreservedVoice) throw new Error("Camera shutdown interrupted the live voice session.");
+  }
+  console.log(JSON.stringify({ providerConnected, greetingAudioReceived: audioReceived, cameraOffPreservedVoice: process.argv.includes("--camera") ? cameraOffPreservedVoice : "not_checked", syntheticMicrophone: true, physicalPhoneVerified: false, catalogMutationsRequested: false }));
 } catch {
   console.error(JSON.stringify({ liveVoiceCheckPassed: false, providerConnected, greetingAudioReceived: audioReceived, syntheticMicrophone: true }));
   process.exitCode = 1;
